@@ -143,6 +143,19 @@ trust:
   drift_rate: 0.02                     # drift 2% per turn toward drift_target
   drift_target: 0.7
 
+# --- §4.3 / §6.15: rough starting values (the burn-in settles the real ones) ---------
+# CLAUDE.md leaves the rough pre-burn-in wages and stocks open. Our choice (Phase 1, to be
+# revisited in Phase 4 calibration):
+#   L0[i,g] = labor_force_i * consumption_share[i,g]          (workers spread by budget shares)
+#   E0[i,g] = (gamma_g / beta_g) * (wage / P_energy) * L0       (the factor-demand ratio of §6.2)
+#   stock0[i,g] = stock_quarters * Q0[i,g] for FOOD, GOODS, TECH
+#   stock0[i,ENERGY] = stock_quarters * max(Q0[i,ENERGY], sum_g E0[i,g])   (enough to produce turn 1)
+#   H0 = s0 * Y_disp0 / c_w (the steady-state cash stock of §6.3)
+initial_state:
+  wage: 1.0
+  stock_quarters: 1.0
+  trust_self: 1.0                      # trust[i,i]; unused by the engine, kept in [0,1]
+
 # --- §6.15: burn-in -------------------------------------------------------
 burn_in:
   turns: 8

@@ -8,13 +8,15 @@ from typing import Annotated, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from world.rng import Stream
+
 # Fixed by CLAUDE.md. Config files must match these exactly; code indexes arrays in this order.
 SECTORS: tuple[str, ...] = ("FOOD", "ENERGY", "GOODS", "TECH", "SERVICES")
 TRADED_SECTORS: tuple[str, ...] = SECTORS[:4]
 COUNTRIES: tuple[str, ...] = ("DORNE", "BRONTIA", "CERES", "FALKEN", "AURELIA", "EVERMERE")
 MOVE_ORDER: tuple[str, ...] = ("DORNE", "BRONTIA", "CERES", "FALKEN", "AURELIA")
 RANDOM_SLOT_COUNTRY = "EVERMERE"
-RNG_STREAMS: dict[str, int] = {"SHOCK": 1, "ORDER": 2, "HORIZON": 3, "FIRMS": 4, "BOT": 5}
+RNG_STREAMS: dict[str, int] = {s.name: s.value for s in Stream}
 ESCALATION_LEVELS: tuple[int, ...] = (-2, 0, 4, 12, 28, 60)  # 2^x - 4
 
 SHARE_TOLERANCE = 1e-9
@@ -200,6 +202,12 @@ class TrustCfg(Strict):
     drift_target: Probability
 
 
+class InitialStateCfg(Strict):
+    wage: Positive
+    stock_quarters: NonNegative
+    trust_self: Probability
+
+
 class BurnInCfg(Strict):
     turns: Annotated[int, Field(ge=0)]
     policy: Literal["status_quo"]
@@ -324,6 +332,7 @@ class WorldConfig(Strict):
     military: MilitaryCfg
     stability: StabilityCfg
     trust: TrustCfg
+    initial_state: InitialStateCfg
     burn_in: BurnInCfg
     rng_streams: dict[str, int]
     horizon: HorizonCfg

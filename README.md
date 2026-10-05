@@ -20,4 +20,7 @@ uv run ruff check
 
 - **Phase 0 (repo setup): done.** uv project, folder layout (empty modules), all config files
   (`config/*.yaml`), validated config loader (`world/config.py`), config tests.
-- Phase 1 onward: not started.
+- **Phase 1 (engine core): done.** Seeded RNG streams (`world/rng.py`), double-entry ledger
+  (`world/ledger.py`), vectorized world state + initial state + state hash
+  (`world/engine/state.py`), production, demand and prices (`world/engine/`).
+- Phase 2 onward: not started.

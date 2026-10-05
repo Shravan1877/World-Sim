@@ -31,3 +31,5 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "N", "SIM"]
+# Engine code uses the math notation of CLAUDE.md (A, L, E, Q, D, P): allow uppercase args/variables.
+ignore = ["N803", "N806"]
