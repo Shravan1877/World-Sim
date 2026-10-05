@@ -645,6 +645,8 @@ Every leader, LLM or bot, implements:
 ```python
 class LeaderPolicy(Protocol):
     def decide(self, briefing: Briefing) -> DecisionResult: ...
+
+
 # DecisionResult = TurnDecision | None, plus raw text, parse_error, tokens, latency, retries
 ```
 Policies: `StatusQuoBot`, `TitForTatBot`, `GreedyBot`, `CooperativeBot`, `RandomBot`

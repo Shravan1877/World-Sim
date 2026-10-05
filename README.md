@@ -23,4 +23,12 @@ uv run ruff check
 - **Phase 1 (engine core): done.** Seeded RNG streams (`world/rng.py`), double-entry ledger
   (`world/ledger.py`), vectorized world state + initial state + state hash
   (`world/engine/state.py`), production, demand and prices (`world/engine/`).
-- Phase 2 onward: not started.
+- **Phase 2 (trade, labor, fiscal, monetary, stability, invariant checks): parts built** (committed
+  together with Phase 3). `step()` was missing and is now in `world/engine/step.py`.
+- **Phase 3 (firms, shocks, trust): built, NOT done.** Firms (markups, antitrust, breakups,
+  startup entry, exit, HHI, profit payout), military, trust, all §7 shocks with timed multipliers,
+  scenario incidents (`config/scenarios/energy_crunch.yaml`), leader change, move order, and the full
+  `turn_start()` + `step()` in §6.1 order. **Blocked:** the 14-turn invariants test fails on turn 7 in
+  all 20 seeds. Energy importers lose all energy after turn 1 (firm energy inputs come from stock,
+  and nothing refills it), their GDP reaches 0, and the debt premium becomes infinite. This needs a
+  CLAUDE.md decision (see the Phase 3 summary).

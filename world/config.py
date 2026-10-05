@@ -182,6 +182,7 @@ class StabilityCfg(Strict):
     leader_fall_threshold: Annotated[float, Field(ge=0, le=100)]
     leader_fall_prob_default: Probability
     leader_change_stability_bonus: NonNegative
+    renounce_stability_cost_default: NonNegative
 
     @model_validator(mode="after")
     def _bounds(self) -> StabilityCfg:
@@ -202,8 +203,12 @@ class TrustCfg(Strict):
     drift_target: Probability
 
 
+class InvariantsCfg(Strict):
+    rel_tol: Positive
+    abs_tol: Positive
+
+
 class InitialStateCfg(Strict):
-    wage: Positive
     stock_quarters: NonNegative
     trust_self: Probability
 
@@ -332,6 +337,7 @@ class WorldConfig(Strict):
     military: MilitaryCfg
     stability: StabilityCfg
     trust: TrustCfg
+    invariants: InvariantsCfg
     initial_state: InitialStateCfg
     burn_in: BurnInCfg
     rng_streams: dict[str, int]
@@ -533,6 +539,39 @@ class ShocksConfig(Strict):
         return v
 
 
+# ------------------------------------------------------------------- scenarios/*.yaml
+
+
+class Incident(Strict):
+    """One scheduled shock: fires at the start of `turn`, the same in every run and condition."""
+
+    turn: Annotated[int, Field(ge=1)]
+    shock: str
+    country: CountryName | None = None
+    sector: Sector | None = None
+
+
+class ScenarioCfg(Strict):
+    name: str
+    description: str = ""
+    incidents: list[Incident]
+
+
+def check_scenario(scenario: ScenarioCfg, shocks: ShocksConfig) -> None:
+    """Every incident must name a known shock and give the country/sector that shock needs."""
+    by_id = {s.id: s for s in shocks.shocks}
+    for inc in scenario.incidents:
+        spec = by_id.get(inc.shock)
+        if spec is None:
+            raise ValueError(f"scenario {scenario.name}: unknown shock {inc.shock!r}")
+        if spec.scope == "state_dependent":
+            raise ValueError(f"scenario {scenario.name}: {inc.shock} is state-dependent, cannot be scheduled")
+        if spec.scope != "world" and inc.country is None:
+            raise ValueError(f"scenario {scenario.name}: {inc.shock} needs a country")
+        if spec.effect.sector == "ANY" and inc.sector is None:
+            raise ValueError(f"scenario {scenario.name}: {inc.shock} needs a sector")
+
+
 # ---------------------------------------------------------------------- escalation.yaml
 
 
@@ -671,3 +710,12 @@ def load_raw(config_dir: Path = DEFAULT_CONFIG_DIR) -> dict[str, dict]:
 def load_config(config_dir: Path = DEFAULT_CONFIG_DIR) -> Config:
     """Load and validate every config file. Raises pydantic.ValidationError on a bad value."""
     return Config.model_validate(load_raw(config_dir))
+
+
+def load_scenario(
+    name: str, config_dir: Path = DEFAULT_CONFIG_DIR, shocks: ShocksConfig | None = None
+) -> ScenarioCfg:
+    """Load config/scenarios/<name>.yaml and check it against the shock list."""
+    scenario = ScenarioCfg.model_validate(read_yaml(Path(config_dir) / "scenarios" / f"{name}.yaml"))
+    check_scenario(scenario, shocks if shocks is not None else load_config(config_dir).shocks)
+    return scenario

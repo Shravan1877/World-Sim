@@ -17,7 +17,6 @@ from dataclasses import dataclass, fields
 import numpy as np
 
 from world.config import COUNTRIES, SECTORS, Config
-from world.engine.firms import base_markup
 from world.engine.production import cobb_douglas
 from world.ledger import BOND_MARKET, Account, Ledger, all_accounts, government, households
 
@@ -49,11 +48,25 @@ class Treaty:
 
 @dataclass(frozen=True)
 class ActiveShock:
+    """A timed multiplier. turns_left counts the steps it still applies to (aged at the end of step)."""
+
     shock_id: str
     country: int  # -1 = world-wide
     sector: int  # -1 = not sector-specific
     multiplier: float
     turns_left: int  # -1 = permanent
+    kind: str = "productivity"  # productivity (A) | labor_force (LF) | entry_hazard (startup hazard)
+
+
+@dataclass(frozen=True)
+class Event:
+    """Something that happened in the engine (shock, firm entry, leader change). Logged only."""
+
+    kind: str
+    country: int = -1
+    sector: int = -1
+    detail: str = ""
+    value: float = 0.0
 
 
 @dataclass
@@ -103,7 +116,8 @@ class WorldState:
     military: np.ndarray  # military stock
     default_premium: np.ndarray
     default_turns_left: np.ndarray  # int
-    leader_changes: np.ndarray  # int
+    leader_changes: np.ndarray  # int: count of leader changes so far
+    leader_changed_turn: np.ndarray  # int: turn of the last leader change, -1 = never (memory-wipe flag)
     # --- bilateral, axis order (importer, exporter[, good])
     trust: np.ndarray  # (6, 6): trust[i, j] = how much i trusts j
     sanction: np.ndarray  # (6, 6) bool: sanction[i, j] = i sanctions j
@@ -243,6 +257,8 @@ def consumption_share_matrix(cfg: Config) -> np.ndarray:
 
 def initial_state(cfg: Config, seed: int) -> WorldState:
     """Rough pre-burn-in state (§4.3, §6.15). The rules are documented in world.yaml: initial_state."""
+    from world.engine.firms import base_markup  # local import: firms.py imports Firm/Event from here
+
     w = cfg.world
     init = w.initial_state
     beta = np.array([w.production.exponents[s].beta for s in SECTORS])
@@ -254,13 +270,18 @@ def initial_state(cfg: Config, seed: int) -> WorldState:
     n_firms = _per_country_sector(cfg, lambda c: c.n_firms).astype(np.int64)
     shares = consumption_share_matrix(cfg)
     price = np.full((N_COUNTRIES, N_SECTORS), w.prices.initial_price)
-    wage = np.full(N_COUNTRIES, init.wage)
+    mu0 = base_markup(n_firms, w.firms.mu_dominant)
 
-    # Rough factor allocation and output (see world.yaml initial_state).
+    # Rough but self-consistent factor allocation and output (see world.yaml initial_state):
+    # E0 solves the energy-demand rule E = (1 - mu) gamma P Q / P_E with Q = A L0^beta E^gamma,
+    # and the wage makes total labor demand (1 - mu) beta R / w equal the labor force.
     L0 = lf[:, None] * shares
-    E0 = (gamma / beta)[None, :] * (wage / price[:, ENERGY])[:, None] * L0
+    E0 = np.power(
+        (1.0 - mu0) * gamma * A * np.power(L0, beta) * price / price[:, [ENERGY]], 1.0 / (1.0 - gamma)
+    )
     Q0 = cobb_douglas(A, L0, E0, beta, gamma)
     revenue = price * Q0
+    wage = ((1.0 - mu0) * beta * revenue).sum(axis=1) / lf
     gdp = revenue.sum(axis=1) - price[:, ENERGY] * E0.sum(axis=1)
 
     stock = init.stock_quarters * Q0
@@ -311,7 +332,7 @@ def initial_state(cfg: Config, seed: int) -> WorldState:
         labor=L0,
         energy_in=E0,
         subsidy=zeros65.copy(),
-        markup=base_markup(n_firms, w.firms.mu_dominant),
+        markup=mu0,
         n_firms=n_firms,
         nationalized=np.zeros((N_COUNTRIES, N_SECTORS), dtype=bool),
         dominance_age=np.zeros((N_COUNTRIES, N_SECTORS), dtype=np.int64),
@@ -343,6 +364,7 @@ def initial_state(cfg: Config, seed: int) -> WorldState:
         default_premium=zeros6.copy(),
         default_turns_left=np.zeros(N_COUNTRIES, dtype=np.int64),
         leader_changes=np.zeros(N_COUNTRIES, dtype=np.int64),
+        leader_changed_turn=np.full(N_COUNTRIES, -1, dtype=np.int64),
         trust=trust,
         sanction=np.zeros((N_COUNTRIES, N_COUNTRIES), dtype=bool),
         tariff=np.zeros((N_COUNTRIES, N_COUNTRIES, N_TRADED)),

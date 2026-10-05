@@ -1,4 +1,4 @@
-"""Purity: every Phase 1 engine function gives identical output twice and never mutates inputs."""
+"""Purity: every pure engine function (Phase 1-3) gives identical output twice and never mutates inputs."""
 
 import copy
 from dataclasses import fields, is_dataclass
@@ -6,7 +6,8 @@ from dataclasses import fields, is_dataclass
 import numpy as np
 import pytest
 
-from world.engine import demand, firms, prices, production
+from world.config import load_config
+from world.engine import demand, firms, military, prices, production, trust
 from world.rng import Stream, make_rng
 
 R = make_rng(0, 0, Stream.BOT)  # test data only
@@ -31,9 +32,20 @@ CALLS = {
         production.produce,
         (),
         dict(
-            A=P65, shock_mult=np.ones((6, 5)), nationalized=Q65 > 90, delta_nat=0.15,
-            revenue_last=Q65, subsidy=Q65 / 10, eta=V6 / 500, mu=P65 / 4, beta=BETA, gamma=GAMMA,
-            wage=V6 / 100, price=P65, labor_force=V6, stock=Q65,
+            A=P65,
+            shock_mult=np.ones((6, 5)),
+            nationalized=Q65 > 90,
+            delta_nat=0.15,
+            revenue_last=Q65,
+            subsidy=Q65 / 10,
+            eta=V6 / 500,
+            mu=P65 / 4,
+            beta=BETA,
+            gamma=GAMMA,
+            wage=V6 / 100,
+            price=P65,
+            labor_force=V6,
+            stock=Q65,
         ),
     ),
     "spendable_income": (demand.spendable_income, (V6, V6 / 1000, V6, 0.1), {}),
@@ -48,6 +60,18 @@ CALLS = {
     "inflation_quarterly": (prices.inflation_quarterly, (V6, V6 * 0.99), {}),
     "annualize": (prices.annualize, (V6 / 10000, 4), {}),
     "base_markup": (firms.base_markup, (np.array([[1, 2, 3, 4, 10]]), 0.5), {}),
+    "effective_markup": (
+        firms.effective_markup,
+        (np.full((6, 5), 2), Q65 > 90, np.ones((6, 5), dtype=int), V6 / 1000, 0.5),
+        {},
+    ),
+    "entry_hazard": (firms.entry_hazard, (P65 / 4, np.ones((6, 5)), 1.0, 1.0, load_config().world.firms), {}),
+    "update_military": (military.update_military, (V6, V6 / 10, V6 / 500, 0.05), {}),
+    "update_trust": (
+        trust.update_trust,
+        (R.uniform(0, 1, (6, 6)), trust.TrustEvents(violations=((0, 1),), honored=((2, 3),))),
+        {"p": load_config().world.trust},
+    ),
 }
 
 

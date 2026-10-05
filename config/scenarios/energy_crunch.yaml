@@ -1,0 +1,6 @@
+# Scripted incidents (CLAUDE.md §7). Identical across all conditions and seeds.
+# Each incident fires at the START of its turn (turn_start), on top of the random shock draws.
+name: energy_crunch
+description: DORNE's energy sector is hit by a disaster in quarter 4 (A[ENERGY] x 0.5 for 2 turns).
+incidents:
+  - {turn: 4, shock: energy_disaster, country: DORNE}
