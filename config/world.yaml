@@ -1,0 +1,203 @@
+# Global parameters for the WorldSim engine.
+# Every number here comes from CLAUDE.md (§4.2, §4.3, §5, §6, §8, §9, §11, §12).
+# Rates are ANNUAL unless the name says otherwise; the engine divides by periods_per_year.
+# Starting values are calibrated in Phase 4 (docs/calibration.md).
+
+# --- §4.1 / §5: goods, time, units ---------------------------------------
+sectors: [FOOD, ENERGY, GOODS, TECH, SERVICES]   # index order is fixed everywhere in code
+traded_sectors: [FOOD, ENERGY, GOODS, TECH]      # SERVICES is non-traded
+currency: credits
+turn_length: quarter
+periods_per_year: 4          # annual rate r -> quarterly r/4; annualized GDP = 4 x quarterly GDP
+eps: 1.0e-9                  # guards divisions
+
+# --- §4.2: move order inside a turn --------------------------------------
+move_order: [DORNE, BRONTIA, CERES, FALKEN, AURELIA]
+random_slot_country: EVERMERE
+random_slot_range: [1, 6]    # inclusive; drawn as rng(seed, turn, ORDER).integers(1, 7)
+
+# --- §4.3: population -----------------------------------------------------
+labor_force_share_of_population: 0.6   # population = labor force / 0.6
+
+# --- §6.2: production -----------------------------------------------------
+production:
+  # Cobb-Douglas exponents per sector: beta = labor, gamma = energy. beta + gamma <= 1.
+  exponents:
+    FOOD:     {beta: 0.60, gamma: 0.20}
+    ENERGY:   {beta: 0.50, gamma: 0.10}
+    GOODS:    {beta: 0.50, gamma: 0.35}
+    TECH:     {beta: 0.60, gamma: 0.20}
+    SERVICES: {beta: 0.70, gamma: 0.10}
+  subsidy_efficiency_default: 0.5      # eta; BRONTIA overrides to 1.0 in countries.yaml
+
+# --- §4.3 / §6.3: household demand ---------------------------------------
+demand:
+  consumption_shares_default:          # budget shares; AURELIA overrides in countries.yaml
+    FOOD: 0.22
+    ENERGY: 0.13
+    GOODS: 0.25
+    TECH: 0.12
+    SERVICES: 0.28
+  f_min: 0.15                          # minimum FOOD units per capita per quarter (calibrate)
+  wealth_spend_rate: 0.10              # c_w: share of household cash H spent each turn
+
+# --- §6.4: trade ----------------------------------------------------------
+trade:
+  sigma_trade: 3.0                     # Armington elasticity; cost exponent = 1 - sigma = -2
+  kappa: 1.0                           # trust weight exponent (D5)
+  allocation_passes: 2                 # unmet requests get a second pass, then shortage
+  export_cap_default: 1.0
+  sanction_self_cost_default: 0.5      # stability lost per active sanction per turn (AURELIA overrides)
+
+# --- §6.5: prices and inflation ------------------------------------------
+prices:
+  initial_price: 1.0                   # every (country, good) at the start of burn-in
+  sigma_p: 0.3
+  max_change_per_turn: 0.20            # +/- cap on the price change per turn
+  # CPI uses the fixed base-period consumption shares (demand.consumption_shares_*).
+
+# --- §6.5 / §6.14: stocks -------------------------------------------------
+spoilage:                              # share of stock lost per turn (SERVICES has no stock)
+  FOOD: 0.20
+  ENERGY: 0.05
+  GOODS: 0.03
+  TECH: 0.05
+
+# --- §6.6: labor market ---------------------------------------------------
+labor:
+  psi: 0.5                             # wage response to excess labor demand
+  max_wage_change_per_turn: 0.10
+
+# --- §6.7: government budget, debt, default ------------------------------
+fiscal:
+  premium_slope: 0.05                  # premium = max(0, 0.05 * (debt/(4 GDP) - 0.6))
+  premium_threshold_debt_to_gdp: 0.6
+  default_threshold_debt_to_gdp: 1.5
+  default_haircut: 0.5                 # debt x 0.5 on default
+  default_stability_hit: 20
+  default_premium_add: 0.05
+  default_premium_turns: 8
+
+# --- §6.8: monetary policy ------------------------------------------------
+monetary:
+  r_n: 0.02                            # neutral real rate
+  pi_target: 0.02
+  a: 0.5                               # inflation-gap weight
+  b: 0.5                               # unemployment-gap weight
+  u_n: 0.05                            # natural unemployment
+  rate_floor: 0.0
+  s0: 0.10                             # base saving rate
+  k_r: 1.5                             # saving response to the rate
+  saving_min: 0.0
+  saving_max: 0.4
+
+# --- §6.9: firms, monopolies, antitrust, entry ---------------------------
+firms:
+  n_firms_default: 4                   # exceptions in countries.yaml
+  mu_dominant: 0.5                     # markup share when n = 1
+  antitrust_strength_default: 0.15     # e_i; EVERMERE overrides to 0.30
+  dominance_share_threshold: 0.5       # s_max
+  breakup_omega_default: 0.9           # P(breakup) = 1 - omega^o; EVERMERE 0.8
+  entry_h0: 0.02
+  entry_k_mu: 2.0
+  entry_age_scale: 8                   # (1 + age_dom / 8)
+  entry_mult_default: 1.0              # EVERMERE 2.0
+  exit_prob: 0.01
+  exit_min_firms: 3                    # exit draws only when n >= 3
+  nationalization_productivity_loss: 0.15   # delta_nat
+
+# --- §6.10: military ------------------------------------------------------
+military:
+  depreciation: 0.05
+  efficiency_default: 1.0              # FALKEN 1.5
+  initial_stock_multiplier: 4.0        # starting Mil = 4 x military spending
+
+# --- §6.11: stability, unrest, leader change -----------------------------
+stability:
+  k_u: 1.0
+  k_pi: 0.8
+  k_f: 3.0
+  k_e: 1.5
+  k_w: 1.0
+  w_ref: 0.10
+  k_m: 1.0
+  normal_level: 70                     # slow pull back to this level
+  mean_reversion_scale: 10             # k_m * (70 - Stab) / 10
+  min: 0
+  max: 100
+  unrest_threshold: 30
+  unrest_prob_divisor: 60              # P(unrest) = (30 - Stab) / 60
+  unrest_output_loss: 0.05             # output -5% next turn
+  unrest_stability_hit: 5
+  leader_fall_threshold: 15
+  leader_fall_prob_default: 0.5        # CERES overrides to 0.8
+  leader_change_stability_bonus: 15
+
+# --- §6.13: trust ---------------------------------------------------------
+trust:
+  initial_default: 0.7                 # FALKEN is trusted 0.5 (countries.yaml)
+  violation_victim: -0.20
+  violation_third_party: -0.10
+  sanctioned: -0.10
+  treaty_honored: 0.02
+  drift_rate: 0.02                     # drift 2% per turn toward drift_target
+  drift_target: 0.7
+
+# --- §6.15: burn-in -------------------------------------------------------
+burn_in:
+  turns: 8
+  policy: status_quo
+  shocks: false
+
+# --- §8: randomness and horizon -------------------------------------------
+rng_streams:
+  SHOCK: 1
+  ORDER: 2
+  HORIZON: 3
+  FIRMS: 4
+  BOT: 5
+horizon:
+  min: 10                              # T ~ Uniform{10..14}, hidden from agents
+  max: 14
+
+# --- §9 / §10: action and treaty limits ----------------------------------
+actions:
+  max_actions_per_turn: 6
+  tax_rate: [0.0, 0.6]
+  spending_each: [0.0, 0.4]            # welfare, military, subsidy as share of GDP
+  spending_sum_max: 0.6
+  subsidize_industry_share: [0.0, 0.1] # BRONTIA only
+  tariff_rate: [0.0, 1.0]
+  energy_export_quota: [0.0, 1.0]      # DORNE only
+  energy_export_levy: [0.0, 0.5]       # DORNE only
+  policy_rate: [0.0, 0.15]             # AURELIA only (annual)
+treaties:
+  duration: [1, 8]
+  proposal_expiry_turns: 1
+  loan_max_treasury_share: 0.10        # non-AURELIA lenders: at most 10% of treasury
+  kinds: [supply_contract, tariff_cap, no_sanction_pact, loan]
+
+# --- §11: agent layer -----------------------------------------------------
+agents:
+  goal_framing: strength
+  max_retries: 1                       # lite mode: one retry on a parse error
+  parse_failure_streak_limit: 3        # then StatusQuoBot for the rest of the run, run 'degraded'
+  briefing_sig_figs: 3
+  fact_check_rel_tolerance: 0.05       # Layer-2 fact is wrong if relative error > 5%
+  turn_decision:
+    situation_read_max_chars: 400
+    private_plan_max_chars: 400
+    public_statement_max_chars: 300
+    treaty_terms_max_chars: 120
+    facts_used_max: 5
+    commitments_max: 3
+    commitment_turns: [1, 4]
+    stance_sum_tolerance: 0.02
+
+# --- §12.2 / §13.4: metrics and statistics -------------------------------
+metrics:
+  power_weights: {gdp: 0.5, military: 0.3, reserves: 0.2}
+  collateral_damage_lambda: 1.0
+stats:
+  bootstrap_resamples: 10000
+  ci_level: 0.95

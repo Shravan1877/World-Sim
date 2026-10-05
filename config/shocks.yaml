@@ -1,0 +1,77 @@
+# Shock hazards and effects (CLAUDE.md §7). Drawn at turn start from the SHOCK stream
+# with key (seed, turn, SHOCK, shock_id[, country]) so every model faces the same dice.
+# hazard = probability per turn per unit of `scope`. duration_turns: null = permanent.
+# State-dependent shocks (startup entry, unrest, leader fall) take their hazards from
+# world.yaml (firms / stability) and are listed here for completeness with hazard: null.
+
+shocks:
+  - id: harvest_failure
+    scope: country
+    hazard_default: 0.02
+    hazard_by_country: {CERES: 0.04}
+    effect: {kind: productivity, sector: FOOD, multiplier: 0.6}
+    duration_turns: 2
+
+  - id: energy_disaster
+    scope: country
+    hazard_default: 0.0
+    hazard_by_country: {DORNE: 0.03}
+    effect: {kind: productivity, sector: ENERGY, multiplier: 0.5}
+    duration_turns: 2
+
+  - id: industry_collapse
+    scope: country_sector             # one draw per (country, sector)
+    hazard_default: 0.005
+    hazard_by_country: {}
+    effect: {kind: productivity, sector: ANY, multiplier: 0.5, n_firms_change: -1, n_firms_min: 1}
+    duration_turns: 4
+
+  - id: pandemic
+    scope: world
+    hazard_default: 0.02
+    hazard_by_country: {}
+    effect: {kind: labor_force, multiplier: 0.9}
+    duration_turns: 3
+
+  - id: leader_death
+    scope: country
+    hazard_default: 0.01
+    hazard_by_country: {}
+    effect: {kind: leader_change}
+    duration_turns: 0
+
+  - id: industry_leader_death
+    scope: dominant_firm              # one draw per (country, sector) with n <= dominant_max_firms
+    dominant_max_firms: 2
+    hazard_default: 0.01
+    hazard_by_country: {}
+    effect: {kind: productivity, sector: ANY, multiplier: 0.8, entry_hazard_multiplier: 2.0, entry_hazard_turns: 4}
+    duration_turns: 2
+
+  - id: resource_discovery
+    scope: country
+    hazard_default: 0.01
+    hazard_by_country: {}
+    effect: {kind: productivity, sector: ENERGY, multiplier: 1.3}
+    duration_turns: null              # permanent
+
+  - id: startup_disruption
+    scope: state_dependent            # hazard from world.yaml firms.entry_* (FIRMS stream, §6.9)
+    hazard_default: null
+    hazard_by_country: {}
+    effect: {kind: firm_entry, n_firms_change: 1}
+    duration_turns: 0
+
+  - id: unrest
+    scope: state_dependent            # world.yaml stability.unrest_* (§6.11)
+    hazard_default: null
+    hazard_by_country: {}
+    effect: {kind: unrest}
+    duration_turns: 1
+
+  - id: leader_fall
+    scope: state_dependent            # world.yaml stability.leader_fall_* (§6.11)
+    hazard_default: null
+    hazard_by_country: {}
+    effect: {kind: leader_change}
+    duration_turns: 0

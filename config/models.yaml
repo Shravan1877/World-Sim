@@ -1,0 +1,63 @@
+# Limits are PUBLISHED limits. The limiter applies `safety` (0.8) on top.
+# status: verified | untested | unverified.  A model with a TODO_VERIFY id or status != verified
+# must be refused by the runner for real experiment runs (smoke/probe runs only).
+defaults:
+  structured_method: TODO_VERIFY  # json_schema | function_calling | json_mode; Phase 6 probe sets it per model
+  safety: 0.8
+  temperature: 0.7
+  max_output_tokens: 1000        # real TurnDecision needs ~700; replies run verbose, keep a cap
+  max_concurrency: 1
+  retries_transient: 3
+
+models:
+  m3b:
+    provider: mistral
+    model_id: ministral-3b-2512
+    limits: {rps: 12.5, tpm: 1300000, rpm: null, rpd: null, tpd: null, tokens_per_month: 1000000000}
+    quota_window: {kind: monthly}
+    latency_assumed_s: 1.5
+    max_concurrency: 2           # far below its limits; limiter still enforces the pace
+    status: untested             # listed on the key; no chat call tested yet
+    source: "Mistral console Limits page (owner paste 2026-10-05)"
+  m8b:
+    provider: mistral
+    model_id: ministral-8b-2512
+    limits: {rps: 3.13, rpm: 188, tpm: 625000, rpd: null, tpd: null, tokens_per_month: 1000000000}
+    quota_window: {kind: monthly}
+    latency_measured_s: 2.6
+    max_concurrency: 2
+    status: verified             # live call 2026-10-06, valid JSON, headers match
+    source: "live response headers 2026-10-06"
+  m14b:
+    provider: mistral
+    model_id: ministral-14b-2512
+    limits: {rps: 0.5, rpm: 30, tpm: 937500, rpd: null, tpd: null, tokens_per_month: 1000000000}
+    quota_window: {kind: monthly}
+    latency_measured_s: 3.2
+    status: verified
+    source: "live response headers 2026-10-06"
+  g31:
+    provider: google
+    model_id: gemini-3.1-flash-lite   # exact id from the owner (AI Studio, 2026-10-06); probe confirms
+    limits: {rps: null, rpm: 15, tpm: 250000, rpd: 500, tpd: null}
+    quota_window: {kind: daily, tz: America/Los_Angeles, at: "00:00"}   # 12:30 IST until 2026-11-01, then 13:30 IST
+    quota_group: google_a        # put g31 and g35 in the SAME group if the dashboard shows one shared pool
+    latency_assumed_s: 2.5
+    thinking: TODO_VERIFY        # lowest thinking setting the API offers (check docs for the parameter name)
+    status: unverified
+    source: "Google AI Studio dashboard (owner read 2026-10-06)"
+  g35:
+    provider: google
+    model_id: gemini-3.5-flash-lite   # exact id from the owner (AI Studio, 2026-10-06); probe confirms
+    limits: {rps: null, rpm: 15, tpm: 250000, rpd: 500, tpd: null}
+    quota_window: {kind: daily, tz: America/Los_Angeles, at: "00:00"}
+    quota_group: google_b
+    latency_assumed_s: 2.5
+    thinking: TODO_VERIFY
+    status: unverified
+    source: "Google AI Studio dashboard (owner read 2026-10-06)"
+
+blocked_or_unavailable:          # tested 2026-10-06; never route traffic here
+  - {model_id: mistral-small-2603,   reason: "429 with limit-req-minute 0 (zero allowance)"}
+  - {model_id: mistral-medium-latest, reason: "429 with limit-req-minute 0 (zero allowance)"}
+  - {model_id: mistral-large,         reason: "not in this key's model list"}

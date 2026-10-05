@@ -1119,8 +1119,13 @@ Video rule: record replays of finished runs. Never run live.
 ## 18. Working rules for Claude Code
 
 1. Work **one phase at a time** (see PHASES.md). Do not start the next phase unprompted.
-2. Before coding a phase: read the relevant CLAUDE.md sections, then write a short plan and
-   wait for approval.
+2. Before coding a phase: read the relevant CLAUDE.md sections, then write a short plan
+   (10 lines at most) and **start building right away. Do not wait for approval.** Stop only if an
+   equation looks wrong, a design or equation change is needed, a live LLM run would use quota, or a
+   test keeps failing after 3 honest attempts. Write real files to disk in the repo folder. At the
+   end of every phase show the raw output of `ls -R` (no .venv/.git), `uv run pytest`,
+   `uv run ruff check` and `git log --oneline`, and never say work is done unless it is on disk
+   and committed.
 3. **Tests first or alongside.** A phase is done only when `uv run pytest` passes (live tests
    skipped) and `ruff check` is clean.
 4. Never weaken a test or loosen a tolerance to make it pass. If math seems wrong, stop and
@@ -1234,4 +1239,3 @@ blocked_or_unavailable:          # tested 2026-10-06; never route traffic here
 Config validation tests: every model has limits or an explicit null; `safety` in (0, 1];
 `max_concurrency` ≥ 1; the runner refuses real runs for any model whose `model_id` contains
 `TODO_VERIFY` or whose status is not `verified`; `g31` and `g35` must not share an id.
-
