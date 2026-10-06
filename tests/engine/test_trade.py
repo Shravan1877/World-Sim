@@ -174,3 +174,40 @@ def test_input_ledger_not_mutated() -> None:
     before = dict(a["ledger"].balances)
     allocate_trade(**a)
     assert a["ledger"].balances == before
+
+
+def test_payer_weights_split_import_bill_between_buyers() -> None:
+    """D34: households, government and the importer's own ENERGY firms pay their demand shares."""
+    tariff = np.zeros((N, N, 4))
+    tariff[0, 1, 1] = 0.5
+    a = _setup(tariff=tariff)
+    a["demand"][0] = [0.0, 100.0, 0.0, 0.0]  # importer 0 needs 100 ENERGY
+    a["output"][1:4] = 0.0
+    a["output"][1, 1] = 1000.0  # only exporter 1, price 1.0
+    weights = np.zeros((N, 4, 3))
+    weights[:, :, 0] = 1.0
+    weights[0, 1] = [0.4, 0.0, 0.6]  # 40% household energy, 60% firm stock-building
+    a["ledger"] = Ledger.with_opening({households(0): 1000.0})
+    r = allocate_trade(**a, payer_weights=weights)
+    L = r.ledger
+    assert L.balance(firms(1, 1)) == pytest.approx(100.0)
+    assert L.balance(households(0)) == pytest.approx(1000.0 - 0.4 * 150.0)
+    assert L.balance(firms(0, 1)) == pytest.approx(-0.6 * 150.0)  # settled in the income step
+    assert L.balance(government(0)) == pytest.approx(50.0)  # tariff from both buyers
+    L.check_conservation()
+
+
+def test_government_does_not_pay_tariff_to_itself() -> None:
+    tariff = np.zeros((N, N, 4))
+    tariff[0, 1, 2] = 0.5
+    a = _setup(tariff=tariff)
+    a["demand"][0] = [0.0, 0.0, 100.0, 0.0]
+    a["output"][1:4] = 0.0
+    a["output"][1, 2] = 1000.0
+    weights = np.zeros((N, 4, 3))
+    weights[:, :, 0] = 1.0
+    weights[0, 2] = [0.0, 1.0, 0.0]  # all GOODS demand is military
+    a["ledger"] = Ledger.with_opening({government(0): 1000.0})
+    L = allocate_trade(**a, payer_weights=weights).ledger
+    assert L.balance(government(0)) == pytest.approx(1000.0 - 100.0)  # pays the price, not the tariff
+    L.check_conservation()

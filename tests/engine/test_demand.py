@@ -61,6 +61,14 @@ def test_government_goods_added_to_total_demand() -> None:
     np.testing.assert_allclose(np.delete(total, 2, axis=1), 1.0)
 
 
+def test_firm_energy_added_to_total_energy_demand() -> None:
+    """D30: D[i,ENERGY] = D_house + sum_g E_d[i,g]; other goods unchanged."""
+    house = np.ones((2, 5))
+    total = total_demand(house, np.zeros(2), np.array([7.0, 0.5]))
+    np.testing.assert_allclose(total[:, 1], [8.0, 1.5])
+    np.testing.assert_allclose(np.delete(total, 1, axis=1), 1.0)
+
+
 def test_household_cash_identity() -> None:
     """Y_disp = Y_spend + (H' - H): income is either spent or added to cash."""
     y, s, H, c_w = np.array([100.0]), np.array([0.1]), np.array([50.0]), 0.1

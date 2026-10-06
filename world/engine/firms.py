@@ -1,4 +1,4 @@
-"""Cournot markups, antitrust, breakups, startup entry, exit, HHI, nationalization, profits (CLAUDE.md §6.9).
+"""Cournot markups, antitrust, breakups, startup entry, exit, HHI, nationalization (CLAUDE.md §6.9).
 
 Each (country, sector) has a tuple of Firm(id, share, owner). n = number of firms.
 
@@ -19,9 +19,9 @@ Our choices where CLAUDE.md is silent (flagged in the Phase 3 summary):
 - the exiting firm is picked uniformly (4th die); its share is spread over the rest in proportion;
 - a nationalized sector is a state monopoly: no breakup, entry or exit.
 
-Profit = whatever is left in the firm account after wages and energy (D28e). It goes to households
-(private owner) or the treasury (state owner). A negative residual (a loss) is covered by the owner,
-so every firm account ends the turn at exactly 0.
+This module decides who owns what (private firms, or a nationalized state sector) and how much
+market power they have. The money (wages, energy inputs, profits and losses to the owners) moves in
+the income step, world/engine/income.py.
 """
 
 from __future__ import annotations
@@ -32,8 +32,6 @@ import numpy as np
 
 from world.config import FirmsCfg
 from world.engine.state import Event, Firm
-from world.ledger import Ledger, government, households
-from world.ledger import firms as firm_account
 from world.rng import RngBundle, Stream
 
 N_DICE = 4  # breakup, entry, exit, exit pick
@@ -221,34 +219,3 @@ def update_firms(
     n_firms = np.array([len(fl) for fl in firms_t], dtype=np.int64).reshape(n_c, n_s)
     markup = np.where(nationalized, 0.0, base_markup(n_firms, p.mu_dominant))
     return FirmsUpdate(firms_t, n_firms, age, markup, hhi_matrix(firms_t, n_s), tuple(events), dice)
-
-
-# ------------------------------------------------------------------------------ profits
-
-
-@dataclass(frozen=True)
-class ProfitPayout:
-    profit: np.ndarray  # (6, 5): residual paid out (negative = loss covered by the owner)
-    private: np.ndarray  # (6,): to households
-    state: np.ndarray  # (6,): to the treasury
-    ledger: Ledger
-
-
-def pay_out_profits(ledger: Ledger, nationalized: np.ndarray) -> ProfitPayout:
-    """Empty every firm account to its owner. Returns a new ledger; firm accounts end at exactly 0."""
-    ledger = ledger.copy()
-    n_c, n_s = nationalized.shape
-    profit = np.zeros((n_c, n_s))
-    for i in range(n_c):
-        for g in range(n_s):
-            acc = firm_account(i, g)
-            bal = ledger.balance(acc)
-            owner = government(i) if nationalized[i, g] else households(i)
-            if bal > 0:
-                ledger.transfer(acc, owner, bal, "profit")
-            elif bal < 0:
-                ledger.transfer(owner, acc, -bal, "loss covered by owner")
-            profit[i, g] = bal
-    private = np.where(nationalized, 0.0, profit).sum(axis=1)
-    state = np.where(nationalized, profit, 0.0).sum(axis=1)
-    return ProfitPayout(profit, private, state, ledger)

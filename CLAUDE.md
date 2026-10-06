@@ -115,6 +115,7 @@ worldsim/
       trade.py                 # Armington-with-trust allocation, rationing (§6.4)
       prices.py                # gradual price rule, CPI, inflation (§6.5)
       labor.py                 # employment, wages (§6.6)
+      income.py                # income step: wages, energy inputs, profits/losses, taxes (§6.1 step 7)
       fiscal.py                # taxes, spending, debt, default (§6.7)
       monetary.py              # Taylor rule, saving response (§6.8)
       firms.py                 # Cournot markup, antitrust, entry, HHI, nationalize (§6.9)
@@ -299,9 +300,9 @@ step:
   4  consumption     consumption = min(demand, available); shortages recorded
   5  stocks          stock-flow update with spoilage
   6  prices          gradual price rule on post-trade excess demand; CPI, inflation
-  7  income/ledger   revenues, wages, profits, tariffs, levies, all via the ledger
+  7  income/ledger   wages, energy inputs, profits/losses to owners, taxes (D31, D33; income.py)
   8  labor           unemployment, wage update
-  9  fiscal          taxes, spending, interest, borrowing, default check
+  9  fiscal          spending, interest, borrowing, default check (GDP_ref, D32)
   10 monetary        Taylor rule (or AURELIA override), saving rate for next turn
   11 firms           markups, antitrust breakup hazard, entry/exit (FIRMS stream), HHI
   12 military        military stock update
@@ -351,6 +352,20 @@ If the food floor binds, scale down the other goods' spending so total spending 
 Government purchases: military spending buys GOODS domestically, `D_gov[i,GOODS] = military_i / P[i,GOODS]`.
 The **total** demand used in trade (§6.4), prices (§6.5) and consumption is
 `D[i,GOODS] = D_house[i,GOODS] + D_gov[i,GOODS]`. Military goods leave the stock (they go into `Mil`, §6.10).
+**Energy refill (D30):** `D[i,ENERGY] = D_house[i,ENERGY] + Σ_g E_d[i,g]`, where `E_d` is this turn's
+planned firm input demand (before rationing, §6.2), used as next turn's expectation. The firm part is
+stock-building: it is delivered into the ENERGY stock, never consumed, so the stock-flow identity
+(§6.14) is unchanged. It enters `D_eff` in the price rule and lowers an exporter's surplus `X` (an
+energy exporter keeps what its own firms need).
+**Buyers and rationing (D34):** each buyer of good g (households, the government for military GOODS,
+the country's ENERGY firm account for the stock-building part) pays its share of demand for imports
+and home purchases. When a good is short, every buyer gets the same fill rate `min(1, available/D)`.
+The ENERGY firm part met from home stock needs no payment (it is already the sector's own stock).
+**Household budget (D35):** `Y_spend` is clipped to `[0, H_i + wages_i·(1 − tax_rate_i)]` (cash on hand
+plus this turn's after-tax wages). Households buy home goods only with the budget left after paying
+for imports at landed cost; units they cannot pay for stay in stock and count as shortage. If import
+bills alone ever exceed the budget, the bond market tops household cash back up to 0 (logged as
+`household cash backstop`; it never fires in status-quo runs).
 Welfare is a cash transfer to households (enters next turn's `Y_disp`).
 Subsidies are cash to firms in the targeted sector (enters `R̃`).
 
@@ -383,7 +398,7 @@ Check (κ=0, trust equal): prices 1.0/1.1/1.3 → shares 41/34/24%. A 30% tariff
 proportionally. Unmet requests go to a **second pass** of steps 2–3 over exporters with
 remaining surplus. After 2 passes, any still-unmet need is a shortage.
 
-**Payments, all through the ledger:** importer households pay `c` per unit. Exporter
+**Payments, all through the ledger:** the importer's buyers (D34, §6.3) pay `c` per unit. Exporter
 firms receive `P[j,g]`. The exporter treasury gets the levy part. The importer treasury
 gets the tariff part. A sanction by i on j blocks trade in **both** directions between
 them. The sanctioning country also pays a self-cost: its stability drops by
@@ -423,21 +438,29 @@ w'_i       = w_i · (1 + clip(ψ · (Σ_g L_d[i,g] − LF_i) / LF_i, −0.10, +0
 
 ```
 GDP_i      = Σ_g P[i,g]·Q[i,g] − Σ_g P[i,ENERGY]·E[i,g]       # value added
-taxes_i    = tax_rate_i · GDP_i
-revenue_i  = taxes_i + tariffs_i + levies_i + state_firm_profits_i
+taxes_i    = tax_rate_i · max(wages_i + private_profits_i, 0)  # D31: household income, not GDP
+revenue_i  = taxes_i + tariffs_i + levies_i + state_firm_profits_i   # state profits untaxed
 outlays_i  = welfare_i + military_i + subsidy_i + interest_i
+GDP_ref_i  = max(mean(GDP_i over the last 4 turns), 0.10 · GDP_i at the start)   # D32
 interest_i = (policy_rate_i + premium_i) / 4 · debt_i
-premium_i  = max(0, 0.05 · (debt_i / (4·GDP_i) − 0.6)) + default_premium_i
+premium_i  = min(max(0, 0.05 · (debt_i / (4·GDP_ref_i) − 0.6)) + default_premium_i, 0.20)   # D32 cap
 treasury' = treasury + revenue − outlays
 if treasury' < 0: debt += −treasury'; treasury' = 0          # borrow from the bond market
 ```
-Spending actions are set as shares of GDP and converted to credits at resolution time.
-**Default:** if `debt / (4·GDP) > 1.5` (param), then: debt × 0.5 (haircut, paid by the bond
+Taxes are a ledger transfer from households to the government, collected in the income step
+(§6.1 step 7) right after profits are paid out. `private_profits` is net: positive residuals minus
+private losses (§6.9). GDP is used only for spending shares and, through `GDP_ref`, debt ratios.
+Spending actions are set as shares of GDP and converted to credits at resolution time (last turn's
+GDP, floored at 0). The floor share, window and cap are config values (`world.yaml: fiscal`).
+**Default:** if `debt / (4·GDP_ref) > 1.5` (param), then: debt × 0.5 (haircut, paid by the bond
 market account), stability −20, `default_premium += 0.05` for 8 turns, and while in default
 a country cannot set spending such that `outlays > revenue` (validator enforces this).
-Check: GDP 1000, tax 20% → 200; outlays excluding interest 250; debt 500 at a 12% annual
+Check: household income 1000, tax 20% → 200; outlays excluding interest 250; debt 500 at a 12% annual
 rate (3% per quarter) → interest 15 → treasury change −65.
-Household income: `Y_disp_i = (wages_i + private_profits_i)·(1 − tax_rate_i) + welfare_i + interest_on_savings_i`.
+Household income: `Y_disp_i = wages_i + private_profits_i − taxes_i + welfare_i + interest_on_savings_i`,
+which equals `(wages_i + private_profits_i)·(1 − tax_rate_i) + welfare_i + interest_on_savings_i`
+whenever the base is positive. Here `private_profits_i` is what households actually bore: profits
+received minus the losses they covered (D33).
 
 ### 6.8 Monetary policy (Taylor-style rule)
 
@@ -464,11 +487,16 @@ n=10 → 18, 0.56, 10%.
 μ[i,g] ← μ · (1 − e_i)^k     after k antitrust actions this turn, e_i = 0.15 (EVERMERE 0.30)
 μ[i,g] = 0                   if nationalized (state owner)
 ```
-**Profit = whatever is left.** Each turn a firm account pays wages `w·L` and energy inputs `P_ENERGY·E`,
-and then pays **all the remaining cash** (`revenue + subsidy − wages − energy cost`) out as profit.
-Private owners are households (income, taxed in §6.7). A nationalized sector sends it to the treasury.
+**Profit = whatever is left** (the income step, `world/engine/income.py`). Each turn a firm account pays
+wages `w·L` and energy inputs `P_ENERGY·E`, and then pays **all the remaining cash**
+(`revenue + subsidy − wages − energy cost`) out as profit. Private owners are households (income,
+taxed in §6.7). A nationalized sector sends it to the treasury.
 This residual includes the markup part `μ·revenue` **and** the capital share `1−β−γ` of output, so
 no money is stuck in firm accounts. Test: after every step each firm account balance is 0 (to 1e-9).
+**Losses (D33):** profit may be negative. The owner absorbs it: the treasury for a state sector;
+households for a private one, from their cash (never below 0), and the `bond_market` covers the rest.
+`H_i` is the household ledger balance (no separate array). Sales revenue `R̂` for next turn is all
+sales minus energy imported for stock (the ENERGY account's resale of imports is not its own output).
 Energy bought by firms is paid to the ENERGY firms of the seller country (imports: through the trade
 payment rule in §6.4). A nationalized sector suffers `δ_nat = 0.15` productivity loss.
 **Antitrust breakup (Schumpeter rule):** if the largest firm's share exceeds `s_max = 0.5`
@@ -1115,6 +1143,12 @@ Video rule: record replays of finished runs. Never run live.
 | D27 | Unverified until the Phase 6 probe: Gemini model id strings, whether `m3b` serves chat, per-model vs shared Gemini quota, Gemini token accounting and latency, JSON reliability on the full `TurnDecision` | **Provisional** |
 | D28 | Engine review fixes (flagged as changes to the planned model): (a) energy inputs removed from stock once, in step 1, no second subtraction in the price rule; (b) price rule uses `D_eff = D + export requests` and `S_eff = S_dom + imports`, so a sold-out exporter's price rises; (c) households also spend `c_w=0.10` of their cash stock `H_i` each turn, or the economy leaks money and shrinks; (d) `D_gov` is part of total GOODS demand in trade and prices; (e) firm profit = all remaining cash after wages and energy, paid to owners or treasury, firm accounts end at 0. (b) and (c) were checked with small toy models before editing | Locked, re-test in Phase 4 calibration |
 | D29 | Agent output uses a flat `ActionIn` on the wire; `validator.py` converts to the strict typed actions of §9. Structured-output method (`json_schema` / `function_calling` / `json_mode`) is chosen per model by the Phase 6 probe | Locked; method **Provisional** until probe |
+| D30 | Energy refill: `D[i,ENERGY] = D_house + Σ_g E_d[i,g]` (this turn's planned inputs, before rationing, as next turn's expectation). The firm part is stock-building (into stock, not consumed; §6.14 unchanged), enters `D_eff`, and lowers the exporter's surplus `X` (§6.3) | Locked (owner decision 2026-10-06) |
+| D31 | Tax base = household income: `taxes = tax_rate · (wages + private_profits)`, a ledger transfer households → government. State-firm profits go to the treasury untaxed. GDP only for spending shares and debt ratios (§6.7) | Locked (owner decision 2026-10-06) |
+| D32 | Debt premium guard: every debt/GDP ratio uses `GDP_ref = max(4-turn GDP average, 0.10 × starting GDP)`; total premium capped at 0.20/yr; floor, window and cap in `world.yaml` (§6.7). "Starting GDP" = the initial state's GDP until the Phase 4 burn-in resets it to the settled GDP | Locked (owner decision 2026-10-06) |
+| D33 | Firm losses: profit may be negative; owners absorb it (households from their cash, never below 0, then the `bond_market`; the treasury for state firms). Firm accounts end every turn at 0. `H_i` = household ledger balance. Policies set this turn apply to this turn's resolution; income earned this turn is spent next turn (§6.9) | Locked (owner decision 2026-10-06) |
+| D34 | Who pays (assistant, under the D33 rule "keep the ledger closed"): every buyer of a good (households; government for military GOODS; the ENERGY firm account for the D30 stock-building part) pays its demand share of imports and home purchases; a government's share of its own tariff moves nothing; short goods give every buyer the same fill rate; `R̂` = sales − energy imported for stock (§6.3, §6.4, §6.9) | Added by assistant, change if unwanted |
+| D35 | Household budget (assistant, to keep `H ≥ 0`, §6.14): `Y_spend` clipped to `[0, H + wages·(1 − tax)]`; home purchases only with what is left after import bills; a logged bond-market backstop tops `H` up to 0 if import bills alone exceed the budget (never fires in status-quo runs). Spending plans use `max(last GDP, 0)`; welfare/GDP in stability uses `max(GDP, GDP floor)` (§6.3, §6.11) | Added by assistant, change if unwanted |
 
 ---
 

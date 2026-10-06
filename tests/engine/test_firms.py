@@ -6,8 +6,6 @@ import pytest
 from world.config import COUNTRIES, SECTORS, load_config
 from world.engine import firms
 from world.engine.state import Firm
-from world.ledger import Ledger, government, households
-from world.ledger import firms as firm_account
 from world.rng import RngBundle
 
 CFG = load_config()
@@ -145,17 +143,3 @@ def test_firm_dice_do_not_depend_on_state() -> None:
         **kwargs,
     )
     np.testing.assert_array_equal(a.dice, b.dice)
-
-
-def test_profit_payout_routes_to_owner_and_empties_accounts() -> None:
-    led = Ledger.with_opening({households(0): 100.0, government(0): 100.0})
-    led.transfer(households(0), firm_account(0, 0), 10.0, "sales")  # private, profit +10
-    led.transfer(government(0), firm_account(0, 1), 4.0, "sales")  # state, profit +4
-    led.transfer(firm_account(0, 2), households(0), 3.0, "wages")  # private, loss -3
-    nat = np.zeros((6, 5), dtype=bool)
-    nat[0, 1] = True
-    out = firms.pay_out_profits(led, nat)
-    assert out.private[0] == pytest.approx(7.0)
-    assert out.state[0] == pytest.approx(4.0)
-    assert all(out.ledger.balance(firm_account(i, g)) == 0.0 for i in range(6) for g in range(5))
-    out.ledger.check_conservation()

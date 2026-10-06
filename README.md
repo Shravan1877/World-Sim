@@ -23,12 +23,12 @@ uv run ruff check
 - **Phase 1 (engine core): done.** Seeded RNG streams (`world/rng.py`), double-entry ledger
   (`world/ledger.py`), vectorized world state + initial state + state hash
   (`world/engine/state.py`), production, demand and prices (`world/engine/`).
-- **Phase 2 (trade, labor, fiscal, monetary, stability, invariant checks): parts built** (committed
-  together with Phase 3). `step()` was missing and is now in `world/engine/step.py`.
-- **Phase 3 (firms, shocks, trust): built, NOT done.** Firms (markups, antitrust, breakups,
-  startup entry, exit, HHI, profit payout), military, trust, all §7 shocks with timed multipliers,
-  scenario incidents (`config/scenarios/energy_crunch.yaml`), leader change, move order, and the full
-  `turn_start()` + `step()` in §6.1 order. **Blocked:** the 14-turn invariants test fails on turn 7 in
-  all 20 seeds. Energy importers lose all energy after turn 1 (firm energy inputs come from stock,
-  and nothing refills it), their GDP reaches 0, and the debt premium becomes infinite. This needs a
-  CLAUDE.md decision (see the Phase 3 summary).
+- **Phase 2 (full economy step): code complete, NOT done.** Trade, labor, fiscal, monetary,
+  stability, invariant checks, `step()`, and the income step (`world/engine/income.py`: wages,
+  energy inputs, profits and losses, taxes). Owner decisions D30–D33 and assistant choices D34–D35
+  are wired in. Every §6.14 invariant holds over 14 turns × 20 seeds, and the income identity
+  closes to 1e-9. **Blocked:** the economy does not settle under status-quo policies (food floor ≈ 4×
+  world food output, money draining into the bond market, stability crash in turn 1), so the 60-turn
+  flow test and the energy-starvation test fail. See `docs/open_issues.md`.
+- **Phase 3 (firms, shocks, trust): built.** The 14-turn × 20-seed invariant test with shocks and
+  the energy_crunch scenario now passes. It waits on the Phase 2 blocker above.

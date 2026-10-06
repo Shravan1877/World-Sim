@@ -77,6 +77,11 @@ fiscal:
   default_stability_hit: 20
   default_premium_add: 0.05
   default_premium_turns: 8
+  # D32: every debt/GDP ratio uses GDP_ref = max(mean of the last 4 quarterly GDPs,
+  # gdp_floor_share_of_start * starting GDP). The total premium is capped.
+  gdp_ma_turns: 4
+  gdp_floor_share_of_start: 0.10
+  premium_cap: 0.20                    # annual, total premium (debt premium + default premium)
 
 # --- §6.8: monetary policy ------------------------------------------------
 monetary:

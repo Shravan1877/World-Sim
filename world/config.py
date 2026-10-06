@@ -119,6 +119,9 @@ class FiscalCfg(Strict):
     default_stability_hit: NonNegative
     default_premium_add: NonNegative
     default_premium_turns: Annotated[int, Field(ge=0)]
+    gdp_ma_turns: Annotated[int, Field(ge=1)]
+    gdp_floor_share_of_start: Probability
+    premium_cap: NonNegative
 
 
 class MonetaryCfg(Strict):

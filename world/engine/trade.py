@@ -13,9 +13,14 @@ Step 2: Armington shares over eligible exporters:
 Step 3: if requests to j exceed j's remaining surplus, scale them proportionally.
 Unmet requests get a second pass (steps 2-3) over exporters with surplus left; the rest is shortage.
 
-Payments (ledger): importer households pay c per unit; exporter firms get P[j]; the exporter's
+Payments (ledger): the importer pays c per unit; exporter firms get P[j]; the exporter's
 government gets the levy part; the importer's government gets the tariff part. Contract
 deliveries are paid at the contract price, all to the seller's firms (no tariff or levy).
+
+Who is "the importer" (D34): the buyers of good g in country i split every payment by their share
+of total demand: households (D_house), the government (military GOODS, D_gov) and the country's own
+ENERGY firm account (the stock-building firm part of ENERGY demand, D30). `payer_weights[i, g]`
+holds those three shares; without it, households pay for everything.
 """
 
 from __future__ import annotations
@@ -24,9 +29,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from world.ledger import Ledger, firms, government, households
+from world.ledger import Account, Ledger, firms, government, households
 
 N_TRADED = 4
+N_PAYERS = 3  # payer_weights[..., k]: 0 households, 1 government, 2 the importer's own firms[i, g]
 
 
 @dataclass(frozen=True)
@@ -83,19 +89,41 @@ def armington_shares(
     return np.where(total > 0, score / np.where(total > 0, total, 1.0), 0.0)
 
 
+def _payers(i: int, g: int) -> tuple[Account, Account, Account]:
+    return households(i), government(i), firms(i, g)
+
+
+def _pay_split(
+    ledger: Ledger, i: int, g: int, weights: np.ndarray, dst: Account, amount: float, reason: str
+) -> None:
+    """The buyers of good g in country i pay `amount` to dst, split by `weights` (sums to 1).
+
+    A payer that is also the receiver (the government's share of its own tariff) moves nothing.
+    """
+    for payer, w in zip(_payers(i, g), weights, strict=True):
+        if w > 0 and amount * w > 0 and payer != dst:
+            ledger.transfer(payer, dst, amount * float(w), reason)
+
+
 def _pay_imports(
-    ledger: Ledger, g: int, granted: np.ndarray, price: np.ndarray, levy: np.ndarray, cost: np.ndarray
+    ledger: Ledger,
+    g: int,
+    granted: np.ndarray,
+    price: np.ndarray,
+    levy: np.ndarray,
+    cost: np.ndarray,
+    weights: np.ndarray,
 ) -> None:
     for i, j in zip(*np.nonzero(granted > 0), strict=True):
         q = float(granted[i, j])
         base = float(price[j]) * q
         levy_part = base * float(levy[j])
         tariff_part = float(cost[i, j]) * q - base - levy_part
-        ledger.transfer(households(i), firms(j, g), base, f"import g{g} {j}->{i}")
+        _pay_split(ledger, i, g, weights[i], firms(j, g), base, f"import g{g} {j}->{i}")
         if levy_part > 0:
-            ledger.transfer(households(i), government(j), levy_part, f"export levy g{g} {j}->{i}")
+            _pay_split(ledger, i, g, weights[i], government(j), levy_part, f"export levy g{g} {j}->{i}")
         if tariff_part > 0:
-            ledger.transfer(households(i), government(i), tariff_part, f"tariff g{g} {j}->{i}")
+            _pay_split(ledger, i, g, weights[i], government(i), tariff_part, f"tariff g{g} {j}->{i}")
 
 
 def allocate_trade(
@@ -114,13 +142,18 @@ def allocate_trade(
     passes: int,
     contracts: tuple[SupplyContract, ...] | list[SupplyContract],
     ledger: Ledger,
+    payer_weights: np.ndarray | None = None,
 ) -> TradeResult:
     """Run §6.4 for all traded goods. Array inputs are the traded columns: (6, 4) or (6, 6, 4).
 
+    payer_weights (6, 4, 3): who pays for country i's purchases of good g (see module doc).
     Returns a new ledger; the input ledger is not changed.
     """
     n = stock.shape[0]
     ledger = ledger.copy()
+    if payer_weights is None:
+        payer_weights = np.zeros((n, N_TRADED, N_PAYERS))
+        payer_weights[:, :, 0] = 1.0
     s_dom = stock + output
     surplus = np.maximum(s_dom - demand, 0.0)
     need = np.maximum(demand - s_dom, 0.0)
@@ -153,8 +186,14 @@ def allocate_trade(
                 x_rem[c.seller] -= q
                 pair_rem[c.buyer, c.seller] -= q
                 m_rem[c.buyer] = max(m_rem[c.buyer] - q, 0.0)
-                ledger.transfer(
-                    households(c.buyer), firms(c.seller, g), c.price * q, f"contract {c.treaty_id}"
+                _pay_split(
+                    ledger,
+                    c.buyer,
+                    g,
+                    payer_weights[c.buyer, g],
+                    firms(c.seller, g),
+                    c.price * q,
+                    f"contract {c.treaty_id}",
                 )
 
         # Steps 2-3, repeated for each pass.
@@ -173,7 +212,7 @@ def allocate_trade(
             x_rem = np.maximum(x_rem - granted.sum(axis=0), 0.0)
             pair_rem = np.maximum(pair_rem - granted, 0.0)
             m_rem = np.maximum(m_rem - granted.sum(axis=1), 0.0)
-            _pay_imports(ledger, g, granted, price[:, g], levy[:, g], cost[:, :, g])
+            _pay_imports(ledger, g, granted, price[:, g], levy[:, g], cost[:, :, g], payer_weights[:, g])
         unmet[:, g] = m_rem
 
     return TradeResult(

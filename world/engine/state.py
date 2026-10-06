@@ -105,6 +105,8 @@ class WorldState:
     debt: np.ndarray
     gdp: np.ndarray  # quarterly nominal value added, last turn
     gdp_prev: np.ndarray
+    gdp_hist: np.ndarray  # (6, gdp_ma_turns): last quarterly GDPs, newest last (D32 moving average)
+    gdp_start: np.ndarray  # starting GDP (D32 floor); Phase 4 burn-in resets it to the settled GDP
     cpi: np.ndarray
     cpi_prev: np.ndarray
     inflation_q: np.ndarray  # quarterly CPI inflation
@@ -352,6 +354,8 @@ def initial_state(cfg: Config, seed: int) -> WorldState:
         debt=debt,
         gdp=gdp,
         gdp_prev=gdp.copy(),
+        gdp_hist=np.tile(gdp[:, None], (1, w.fiscal.gdp_ma_turns)),
+        gdp_start=gdp.copy(),
         cpi=cpi,
         cpi_prev=cpi.copy(),
         inflation_q=zeros6.copy(),

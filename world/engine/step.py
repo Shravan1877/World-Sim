@@ -9,15 +9,18 @@
 
 Both functions are pure: they copy the state and return a new one. All money moves through the
 ledger. Spending plans are shares of GDP, turned into credits with LAST turn's GDP (the latest
-known value when the turn starts).
+known value when the turn starts, floored at 0). Policies set this turn apply to this turn's
+resolution; income earned this turn is spent next turn (D33).
 
-Taxes follow §6.7 as written: taxes = tax_rate * GDP, paid by households (the ledger needs a payer;
-households receive the wages and private profits). Y_disp also follows §6.7 as written. The two
-differ when GDP is not all paid out as household income (fiscal open question A, still open).
-
-Choices where CLAUDE.md is silent (flagged in the Phase 3 summary):
+Decisions wired here (CLAUDE.md §17):
+- D30: ENERGY demand = households + firms' planned energy inputs (stock-building, not consumed).
+- D31: taxes on household income, collected in the income step (income.py).
+- D32: debt ratios use the floored 4-quarter GDP average; the premium is capped.
+- D33: firm losses go to the owners, then the bond market; firm accounts end at 0.
+- D34: every buyer of a good (households, government, the ENERGY firm account) pays its demand share
+  of imports and home purchases; when a good is short, every buyer gets the same fill rate.
+- D35: household spending this turn is capped at cash on hand + this turn's after-tax wages.
 - Subsidy with no target (-1) is spread over sectors by last turn's revenue shares.
-- Military buys GOODS: when GOODS are rationed, households and government get the same fill rate.
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ import numpy as np
 from world.config import COUNTRIES, SECTORS, Config, ScenarioCfg
 from world.engine import demand as demand_mod
 from world.engine import firms as firms_mod
-from world.engine import fiscal, invariants, labor, military, monetary, prices, production, shocks
+from world.engine import fiscal, income, invariants, labor, military, monetary, prices, production, shocks
 from world.engine import stability as stab_mod
 from world.engine import trust as trust_mod
 from world.engine.params import country_params
@@ -130,6 +133,27 @@ def _safe_div(a: np.ndarray, b: np.ndarray, eps: float) -> np.ndarray:
     return a / np.maximum(b, eps)
 
 
+N_PAYERS = 3  # households, government, the country's own firms in that sector (trade.N_PAYERS)
+
+
+def payer_weights(
+    d_house: np.ndarray, d_gov: np.ndarray, d_firm_energy: np.ndarray, D: np.ndarray
+) -> np.ndarray:
+    """(6, 5, 3) demand shares of each buyer of good g in country i (D34).
+
+    0 households (D_house), 1 government (military GOODS), 2 the ENERGY firm account (D30 firm part).
+    Where total demand is 0, households are the (notional) buyer.
+    """
+    n_c, n_s = D.shape
+    w = np.zeros((n_c, n_s, N_PAYERS))
+    has = D > 0
+    safe = np.where(has, D, 1.0)
+    w[:, :, 0] = np.where(has, d_house / safe, 1.0)
+    w[:, GOODS, 1] = np.where(has[:, GOODS], d_gov / safe[:, GOODS], 0.0)
+    w[:, ENERGY, 2] = np.where(has[:, ENERGY], d_firm_energy / safe[:, ENERGY], 0.0)
+    return w
+
+
 def step(
     state: WorldState, inputs: TurnInputs | None, rng: RngBundle, cfg: Config
 ) -> tuple[WorldState, TurnLog]:
@@ -164,7 +188,7 @@ def _step(
     stock_start = state.stock
 
     # Spending plans in credits, from last turn's GDP.
-    gdp_last = state.gdp
+    gdp_last = np.maximum(state.gdp, 0.0)
     welfare_c = state.welfare_share * gdp_last
     military_c = state.military_share * gdp_last
     subsidy = subsidy_matrix(state.subsidy_share * gdp_last, state.subsidy_target, state.revenue)
@@ -195,26 +219,22 @@ def _step(
         stock=stock_start,
     )
     Q, L, E = prod.output, prod.labor, prod.energy
-    wages_paid = state.wage[:, None] * L
+    wages_paid = state.wage[:, None] * L  # paid in the income step (7)
     energy_cost = P[:, ENERGY][:, None] * E
-    for i in range(n_c):
-        for g in range(n_s):
-            if wages_paid[i, g] > 0:
-                led.transfer(firm_account(i, g), households(i), wages_paid[i, g], "wages")
-            if g != ENERGY and energy_cost[i, g] > 0:
-                led.transfer(firm_account(i, g), firm_account(i, ENERGY), energy_cost[i, g], "energy inputs")
-    energy_sales = np.zeros((n_c, n_s))
-    energy_sales[:, ENERGY] = energy_cost.sum(axis=1) - energy_cost[:, ENERGY]
 
-    # ---- 2 demand
+    # ---- 2 demand (D30: firms' planned energy inputs refill the ENERGY stock; D35: budget cap)
     y_spend = demand_mod.spendable_income(
         state.y_disp, state.saving_rate, cash_start, w.demand.wealth_spend_rate
     )
+    budget = np.maximum(cash_start + wages_paid.sum(axis=1) * (1.0 - state.tax_rate), 0.0)
+    y_spend = np.clip(y_spend, 0.0, budget)
     d_house, _ = demand_mod.household_demand(
         state.consumption_shares, y_spend, P, w.demand.f_min, state.population
     )
     d_gov = demand_mod.government_goods_demand(military_c, P[:, GOODS])
-    D = demand_mod.total_demand(d_house, d_gov)
+    d_firm_energy = prod.energy_demand.sum(axis=1)
+    D = demand_mod.total_demand(d_house, d_gov, d_firm_energy)
+    payers = payer_weights(d_house, d_gov, d_firm_energy, D)
 
     # ---- 3 trade
     tr = allocate_trade(
@@ -232,30 +252,46 @@ def _step(
         passes=w.trade.allocation_passes,
         contracts=inputs.contracts,
         ledger=led,
+        payer_weights=payers[:, :N_TRADED],
     )
     led = tr.ledger
 
-    # ---- 4 consumption (min of demand and what is available), domestic purchases paid
+    # ---- 4 consumption: every buyer of a good gets the same fill rate min(1, available / D) (D34).
+    # The firm part of ENERGY demand is filled into stock, not consumed (D30).
     s_dom = prod.stock_after_inputs + Q
     available = s_dom.copy()
     available[:, :N_TRADED] += tr.imports - tr.exports
     available[:, SERVICES] = Q[:, SERVICES]
-    consumption = np.minimum(D, np.maximum(available, 0.0))
-    shortage = D - consumption
+    available = np.maximum(available, 0.0)
+    fill = np.where(D > 0, np.minimum(available / np.where(D > 0, D, 1.0), 1.0), 1.0)
+    taken = D * fill
+    shortage = D - taken
+    firm_energy_filled = d_firm_energy * fill[:, ENERGY]
+    consumption = taken.copy()
+    consumption[:, ENERGY] -= firm_energy_filled
+    gov_goods = d_gov * fill[:, GOODS]  # military goods actually received
     imports5 = np.zeros((n_c, n_s))
     imports5[:, :N_TRADED] = tr.imports
-    domestic = np.maximum(consumption - imports5, 0.0)  # units bought from home firms
-    gov_frac = _safe_div(d_gov, D[:, GOODS], eps)
-    gov_goods = consumption[:, GOODS] * gov_frac  # military goods actually received
-    gov_dom = domestic[:, GOODS] * gov_frac
+    domestic = np.maximum(taken - imports5, 0.0)  # units bought from home firms (imports go first)
+    # D35: households buy home goods only with the budget left after paying for imports (landed
+    # costs can exceed home prices). Units they cannot pay for stay in stock and count as shortage.
+    house_dom = domestic * payers[:, :, 0]
+    paid_for_imports = cash_start - np.array([led.balance(households(i)) for i in range(n_c)])
+    left = np.maximum(budget - paid_for_imports, 0.0)
+    want = (P * house_dom).sum(axis=1)
+    afford = np.where(want > left, left / np.where(want > 0, want, 1.0), 1.0)
+    unbought = house_dom * (1.0 - afford[:, None])
+    consumption -= unbought
+    shortage += unbought
     for i in range(n_c):
         for g in range(n_s):
-            gov_part = gov_dom[i] if g == GOODS else 0.0
-            house_part = domestic[i, g] - gov_part
-            if house_part > 0:
-                led.transfer(households(i), firm_account(i, g), P[i, g] * house_part, "domestic sales")
-            if gov_part > 0:
-                led.transfer(government(i), firm_account(i, g), P[i, g] * gov_part, "military goods")
+            house = P[i, g] * house_dom[i, g] * afford[i]
+            gov = P[i, g] * domestic[i, g] * payers[i, g, 1]
+            if house > 0:
+                led.transfer(households(i), firm_account(i, g), house, "domestic sales")
+            if gov > 0:
+                led.transfer(government(i), firm_account(i, g), gov, "military goods")
+            # payers[i, g, 2]: the ENERGY firms keep their own stock for next turn's inputs; no payment
 
     # ---- 5 stocks (spoilage on what is left)
     spoil_rate = np.array([w.spoilage[x] for x in SECTORS[:N_TRADED]])
@@ -272,11 +308,16 @@ def _step(
     infl_q = prices.inflation_quarterly(new_cpi, state.cpi)
     pi_annual = prices.annualize(infl_q, ppy)
 
-    # ---- 7 income: firm revenue, then all residual cash paid out as profit (D28e)
-    firm_bal = np.array([[led.balance(firm_account(i, g)) for g in range(n_s)] for i in range(n_c)])
-    revenue = np.maximum(firm_bal + wages_paid + energy_cost * _not_energy(n_s) - subsidy, 0.0)
-    payout = firms_mod.pay_out_profits(led, state.nationalized)
-    led = payout.ledger
+    # ---- 7 income: wages, energy inputs, profits/losses to owners, taxes (income.py)
+    inc = income.settle_income(
+        led,
+        wages_paid=wages_paid,
+        energy_cost=energy_cost,
+        subsidy=subsidy,
+        nationalized=state.nationalized,
+        tax_rate=state.tax_rate,
+    )
+    led, revenue = inc.ledger, inc.revenue
 
     # ---- 8 labor
     u = labor.unemployment_rate(prod.labor_demand, state.labor_force)
@@ -286,27 +327,32 @@ def _step(
 
     # ---- 9 fiscal
     gdp = fiscal.gdp_value_added(P, Q, E)
-    wages_tot = wages_paid.sum(axis=1)
-    tax = fiscal.taxes(state.tax_rate, np.maximum(gdp, 0.0))
+    gdp_hist = fiscal.push_gdp(state.gdp_hist, gdp)
+    gdp_floor = w.fiscal.gdp_floor_share_of_start * state.gdp_start
+    gdp_ref = fiscal.gdp_reference(gdp_hist, state.gdp_start, w.fiscal.gdp_floor_share_of_start)
     premium = fiscal.risk_premium(
         state.debt,
-        gdp,
+        gdp_ref,
         state.default_premium,
         slope=w.fiscal.premium_slope,
         threshold=w.fiscal.premium_threshold_debt_to_gdp,
+        cap=w.fiscal.premium_cap,
         periods_per_year=ppy,
         eps=eps,
     )
     interest = fiscal.interest_due(state.debt, state.policy_rate, premium, ppy)
     sav_int = monetary.savings_interest(cash_start, state.policy_rate, ppy)
     for i in range(n_c):
-        if tax[i] > 0:
-            led.transfer(households(i), government(i), tax[i], "taxes")
         if welfare_c[i] > 0:
             led.transfer(government(i), households(i), welfare_c[i], "welfare")
         if interest[i] > 0:
             led.transfer(government(i), BOND_MARKET, interest[i], "interest on debt")
     led = monetary.pay_savings_interest(led, sav_int)
+    # Backstop (D35): only if import bills alone exceeded the household budget can cash end below 0;
+    # the bond market then tops households up to 0. Logged; zero in normal runs (tested).
+    backstop = np.maximum(-np.array([led.balance(households(i)) for i in range(n_c)]), 0.0)
+    for i in np.nonzero(backstop > 0)[0]:
+        led.transfer(BOND_MARKET, households(int(i)), backstop[i], "household cash backstop")
     borrowing = np.zeros(n_c)
     for i in range(n_c):
         bal = led.balance(government(i))
@@ -316,7 +362,7 @@ def _step(
     debt = state.debt + borrowing
     dflt = fiscal.apply_default(
         debt,
-        gdp,
+        gdp_ref,
         state.stability,
         state.default_premium,
         state.default_turns_left,
@@ -329,7 +375,7 @@ def _step(
         eps=eps,
     )
     events += [Event("default", i, detail="debt haircut") for i in np.nonzero(dflt.defaulted)[0]]
-    y_disp = fiscal.disposable_income(wages_tot, payout.private, state.tax_rate, welfare_c, sav_int)
+    y_disp = fiscal.disposable_income(inc.wages, inc.profits_to_households, inc.taxes, welfare_c, sav_int)
 
     # ---- 10 monetary
     m = w.monetary
@@ -368,7 +414,7 @@ def _step(
         pi_annual=pi_annual,
         food_shortage_frac=_safe_div(shortage[:, FOOD], D[:, FOOD], eps),
         energy_shortage_frac=_safe_div(shortage[:, ENERGY], D[:, ENERGY], eps),
-        welfare_to_gdp=_safe_div(welfare_c, gdp, eps),
+        welfare_to_gdp=_safe_div(welfare_c, np.maximum(gdp, gdp_floor), eps),
         sanction_cost=sanction_cost,
         shock_effects=renounce_count * cp.renounce_stability_cost,
         u_n=m.u_n,
@@ -415,7 +461,7 @@ def _step(
     s.demand, s.shortage = D, shortage
     s.wage, s.unemployment = new_wage, u
     s.debt, s.default_premium, s.default_turns_left = dflt.debt, dflt.default_premium, dflt.default_turns_left
-    s.gdp_prev, s.gdp = state.gdp, gdp
+    s.gdp_prev, s.gdp, s.gdp_hist = state.gdp, gdp, gdp_hist
     s.cpi_prev, s.cpi, s.inflation_q = state.cpi, new_cpi, infl_q
     s.policy_rate, s.saving_rate, s.y_disp = rate, saving, y_disp
     s.stability, s.military = stab, mil
@@ -446,8 +492,8 @@ def _step(
         shortage=shortage,
         imports=tr.imports,
         exports=tr.exports,
-        taxes=tax,
-        profit=payout.profit,
+        taxes=inc.taxes,
+        profit=inc.profit,
         interest=interest,
         borrowing=borrowing,
         hhi=fu.hhi,
@@ -456,18 +502,24 @@ def _step(
         extra={
             "military_goods": gov_goods,
             "labor_demand": prod.labor_demand,
+            "energy_demand": prod.energy_demand,
+            "energy_used": E,
+            "firm_energy_filled": firm_energy_filled,
+            "surplus": tr.surplus,
+            "y_spend": y_spend,
+            "welfare": welfare_c,
+            "subsidy": subsidy.sum(axis=1),
+            "savings_interest": sav_int,
+            "state_profit": inc.state_profit,
+            "loss_bond_market": inc.loss_bond_market,
+            "household_backstop": backstop,
+            "household_unbought": unbought,
+            "gdp_ref": gdp_ref,
             "unrest": ur.unrest,
             "leader_falls": ur.leader_falls,
         },
     )
     return s, log
-
-
-def _not_energy(n_s: int) -> np.ndarray:
-    """Mask (1, 5): 1 for sectors that pay another account for energy (all but ENERGY itself)."""
-    m = np.ones((1, n_s))
-    m[0, ENERGY] = 0.0
-    return m
 
 
 def _energy_inputs(E: np.ndarray) -> np.ndarray:

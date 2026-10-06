@@ -1,4 +1,4 @@
-"""Household and government demand, the food floor, and household cash (CLAUDE.md §6.3, D28c/d).
+"""Household, government and firm-energy demand, the food floor, household cash (§6.3, D28c/d, D30).
 
 All functions are pure. Shapes: (6, 5) country x sector, (6,) per country.
 
@@ -14,6 +14,7 @@ from __future__ import annotations
 import numpy as np
 
 FOOD = 0
+ENERGY = 1
 GOODS = 2
 
 
@@ -67,8 +68,18 @@ def government_goods_demand(military_spend: np.ndarray, p_goods: np.ndarray) -> 
     return military_spend / p_goods
 
 
-def total_demand(household: np.ndarray, gov_goods: np.ndarray) -> np.ndarray:
-    """Total demand used in trade, prices and consumption: D[i,GOODS] = D_house + D_gov."""
+def total_demand(
+    household: np.ndarray, gov_goods: np.ndarray, firm_energy: np.ndarray | None = None
+) -> np.ndarray:
+    """Total demand used in trade, prices and consumption.
+
+    D[i,GOODS]  = D_house + D_gov                       (D28d)
+    D[i,ENERGY] = D_house + sum_g E_d[i,g]              (D30: firms refill their energy stock)
+    firm_energy is this turn's planned firm input demand (before rationing), the expectation for
+    next turn. That part is stock-building: it is delivered into stock, never consumed.
+    """
     total = household.copy()
     total[:, GOODS] = total[:, GOODS] + gov_goods
+    if firm_energy is not None:
+        total[:, ENERGY] = total[:, ENERGY] + firm_energy
     return total

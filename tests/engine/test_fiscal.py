@@ -1,4 +1,4 @@
-"""Fiscal (§6.7): GDP, interest, premium, borrowing, default."""
+"""Fiscal (§6.7, D31, D32): GDP, taxes, interest, premium, borrowing, default."""
 
 import numpy as np
 import pytest
@@ -6,8 +6,10 @@ import pytest
 from world.engine.fiscal import (
     apply_default,
     disposable_income,
+    gdp_reference,
     gdp_value_added,
     interest_due,
+    push_gdp,
     risk_premium,
     settle_budget,
     taxes,
@@ -25,7 +27,7 @@ DEFAULT = dict(
 
 
 def test_claude_md_budget_check() -> None:
-    # GDP 1000, tax 20% -> 200; outlays excl. interest 250; debt 500 at 12% annual -> 15 -> change -65
+    # household income 1000, tax 20% -> 200; outlays excl. interest 250; debt 500 at 12% -> 15 -> -65
     tax = taxes(np.array([0.2]), np.array([1000.0]))
     interest = interest_due(np.array([500.0]), np.array([0.12]), np.array([0.0]), 4)
     assert interest[0] == pytest.approx(15.0)
@@ -55,11 +57,40 @@ def test_risk_premium() -> None:
         np.array([0.0, 0.05]),
         slope=0.05,
         threshold=0.6,
+        cap=0.20,
         periods_per_year=4,
         eps=1e-9,
     )
     # ratios 0.4 and 1.0 -> 0 and 0.05*0.4=0.02 (+0.05 default premium)
     np.testing.assert_allclose(p, [0.0, 0.07])
+
+
+def test_negative_income_is_not_taxed() -> None:
+    np.testing.assert_allclose(taxes(np.array([0.2, 0.2]), np.array([1000.0, -50.0])), [200.0, 0.0])
+
+
+def test_risk_premium_is_capped() -> None:
+    # D32: debt 100x annual GDP -> uncapped premium ~5; the cap holds it at 0.20 (default premium included)
+    p = risk_premium(
+        np.array([100_000.0, 1000.0]),
+        np.array([250.0, 250.0]),
+        np.array([0.0, 0.18]),
+        slope=0.05,
+        threshold=0.6,
+        cap=0.20,
+        periods_per_year=4,
+        eps=1e-9,
+    )
+    np.testing.assert_allclose(p, [0.20, 0.20])
+
+
+def test_gdp_reference_is_floored_moving_average() -> None:
+    hist = np.array([[100.0, 100.0, 100.0, 100.0], [100.0, 100.0, 100.0, 100.0]])
+    hist = push_gdp(hist, np.array([60.0, -40.0]))
+    np.testing.assert_allclose(hist, [[100, 100, 100, 60], [100, 100, 100, -40]])
+    np.testing.assert_allclose(gdp_reference(hist, np.array([100.0, 100.0]), 0.1), [90.0, 65.0])
+    collapsed = np.zeros((1, 4))
+    np.testing.assert_allclose(gdp_reference(collapsed, np.array([100.0]), 0.1), [10.0])  # floor
 
 
 def test_default_triggers_above_threshold_only() -> None:
@@ -89,7 +120,6 @@ def test_default_premium_expires_after_8_turns_and_no_double_default() -> None:
 
 
 def test_disposable_income() -> None:
-    y = disposable_income(
-        np.array([100.0]), np.array([20.0]), np.array([0.25]), np.array([10.0]), np.array([2.0])
-    )
-    assert y[0] == pytest.approx(120 * 0.75 + 12)
+    tax = taxes(np.array([0.25]), np.array([100.0 + 20.0]))
+    y = disposable_income(np.array([100.0]), np.array([20.0]), tax, np.array([10.0]), np.array([2.0]))
+    assert y[0] == pytest.approx(120 * 0.75 + 12)  # (wages + private profits)(1 - tax) + welfare + interest

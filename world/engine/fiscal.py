@@ -1,16 +1,16 @@
-"""GDP, government budget, interest, borrowing and default (CLAUDE.md §6.7). Pure functions.
+"""GDP, government budget, interest, borrowing and default (CLAUDE.md §6.7, D31, D32). Pure functions.
 
   GDP_i      = sum_g P[i,g] Q[i,g] - sum_g P[i,ENERGY] E[i,g]      (value added)
-  revenue_i  = taxes + tariffs + levies + state firm profits
+  taxes_i    = tax_rate_i * max(wages_i + private_profits_i, 0)     (D31: household income, not GDP)
+  revenue_i  = taxes + tariffs + levies + state firm profits (untaxed)
   outlays_i  = welfare + military + subsidy + interest
+  GDP_ref_i  = max(mean of the last 4 quarterly GDPs, 0.10 * starting GDP)   (D32)
   interest_i = (policy_rate_i + premium_i) / 4 * debt_i
-  premium_i  = max(0, slope * (debt / (4 GDP) - threshold)) + default_premium_i
+  premium_i  = min(max(0, slope * (debt / (4 GDP_ref) - threshold)) + default_premium_i, cap)
   treasury'  = treasury + revenue - outlays; if < 0, borrow the gap (debt += gap, treasury = 0)
-  default    : debt / (4 GDP) > 1.5 -> debt x 0.5, stability -20, premium +0.05 for 8 turns
-
-NOTE (Phase 2, open question A): the tax BASE is not wired here yet. CLAUDE.md says
-taxes = tax_rate * GDP, but Y_disp = (wages + private profits)(1 - tax_rate) taxes income, and the
-two differ whenever output is stocked or sold from stock. `taxes()` takes the base as an input.
+  default    : debt / (4 GDP_ref) > 1.5 -> debt x 0.5, stability -20, premium +0.05 for 8 turns
+GDP itself is used only for spending shares and (through GDP_ref) debt ratios.
+Taxes are collected in the income step (income.py), right after profits are paid out.
 """
 
 from __future__ import annotations
@@ -27,7 +27,18 @@ def gdp_value_added(price: np.ndarray, output: np.ndarray, energy_in: np.ndarray
 
 
 def taxes(tax_rate: np.ndarray, base: np.ndarray) -> np.ndarray:
-    return tax_rate * base
+    """tax_rate * max(base, 0). The base is household income: wages + private profits (D31)."""
+    return tax_rate * np.maximum(base, 0.0)
+
+
+def push_gdp(gdp_hist: np.ndarray, gdp_q: np.ndarray) -> np.ndarray:
+    """Drop the oldest quarter of the GDP window and append this quarter (newest last)."""
+    return np.concatenate([gdp_hist[:, 1:], gdp_q[:, None]], axis=1)
+
+
+def gdp_reference(gdp_hist: np.ndarray, gdp_start: np.ndarray, floor_share: float) -> np.ndarray:
+    """GDP_ref = max(moving average of the window, floor_share * starting GDP) (D32)."""
+    return np.maximum(gdp_hist.mean(axis=1), floor_share * gdp_start)
 
 
 def debt_to_annual_gdp(debt: np.ndarray, gdp_q: np.ndarray, periods_per_year: int, eps: float) -> np.ndarray:
@@ -41,11 +52,13 @@ def risk_premium(
     *,
     slope: float,
     threshold: float,
+    cap: float,
     periods_per_year: int,
     eps: float,
 ) -> np.ndarray:
+    """Total annual premium, capped at `cap` (D32). Pass GDP_ref as gdp_q."""
     ratio = debt_to_annual_gdp(debt, gdp_q, periods_per_year, eps)
-    return np.maximum(0.0, slope * (ratio - threshold)) + default_premium
+    return np.minimum(np.maximum(0.0, slope * (ratio - threshold)) + default_premium, cap)
 
 
 def interest_due(
@@ -124,9 +137,14 @@ def in_default(default_turns_left: np.ndarray) -> np.ndarray:
 def disposable_income(
     wages: np.ndarray,
     private_profits: np.ndarray,
-    tax_rate: np.ndarray,
+    taxes_paid: np.ndarray,
     welfare: np.ndarray,
     savings_interest: np.ndarray,
 ) -> np.ndarray:
-    """Y_disp = (wages + private profits)(1 - tax) + welfare + interest on savings."""
-    return (wages + private_profits) * (1.0 - tax_rate) + welfare + savings_interest
+    """Y_disp = wages + private profits - taxes + welfare + interest on savings.
+
+    With taxes = tax_rate * (wages + private profits) this is the §6.7 formula
+    (wages + private profits)(1 - tax) + welfare + interest. private_profits is what households
+    actually got: profits paid out minus the losses they covered (D33).
+    """
+    return wages + private_profits - taxes_paid + welfare + savings_interest
