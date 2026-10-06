@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from world.config import load_config
+from world.engine.burn_in import load_fixture
 from world.engine.income import settle_income
-from world.engine.state import initial_state
 from world.engine.step import step, turn_start
 from world.ledger import BOND_MARKET, Ledger, government, households
 from world.ledger import firms as firm_account
@@ -140,11 +140,12 @@ def test_income_identity_full_turns(seed: int) -> None:
       y_disp_i + (taxes + tariffs + levies + state profits)_i
         = sales value added_i + subsidies_i + welfare_i + savings interest_i
           + tariffs_i + levies_i + losses the bond market covered_i
+          + treasury surplus and bond-market surplus paid to households_i (D37)
     Sales value added = what the country's firms took in from outside (sales, exports) minus what
     they paid outside (energy imported for stock). Energy sold between home firms nets out.
     No money is stuck in firm accounts, and none is created.
     """
-    s = initial_state(CFG, seed)
+    s = load_fixture(seed)
     rng = RngBundle(seed)
     for _ in range(3):
         s, _ = turn_start(s, rng, CFG, shocks_on=False)
@@ -181,6 +182,9 @@ def test_income_identity_full_turns(seed: int) -> None:
             )
             bond_loss = _sum(new, "loss covered by bond market", dst_kind="firms", country=i)
             lhs = s.y_disp[i] + taxes + tariffs + levies + state_profit
-            rhs = va + subsidy + welfare + sav + tariffs + levies + bond_loss
+            # D37 transfers to households
+            lump = _sum(new, "treasury surplus to households", dst_kind="households", country=i)
+            bond_pay = _sum(new, "bond market surplus to households", dst_kind="households", country=i)
+            rhs = va + subsidy + welfare + sav + tariffs + levies + bond_loss + lump + bond_pay
             assert lhs == pytest.approx(rhs, rel=1e-9, abs=1e-9)
             assert taxes == pytest.approx(log.taxes[i])

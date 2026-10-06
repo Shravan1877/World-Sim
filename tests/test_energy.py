@@ -8,7 +8,7 @@
 
 import numpy as np
 
-from tests.runs import run
+from tests.runs import CFG, run
 
 DORNE, ENERGY = 0, 1
 MIN_FILL = 0.9
@@ -33,5 +33,5 @@ def test_dorne_exports_never_cut_its_own_firms() -> None:
         exports = log.exports[DORNE, ENERGY]
         assert exports <= log.extra["surplus"][DORNE, ENERGY] * (1 + 1e-12)
         if exports > 0:
-            need = log.extra["energy_demand"][DORNE].sum()
+            need = log.extra["energy_demand"][DORNE].sum() / (1 - CFG.world.spoilage["ENERGY"])  # D39
             assert np.isclose(log.extra["firm_energy_filled"][DORNE], need, rtol=1e-12), f"t{s.turn}"

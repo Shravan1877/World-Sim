@@ -38,8 +38,8 @@ demand:
     GOODS: 0.25
     TECH: 0.12
     SERVICES: 0.28
-  f_min: 0.15                          # minimum FOOD units per capita per quarter (calibrate)
-  wealth_spend_rate: 0.10              # c_w: share of household cash H spent each turn
+  f_min: 0.0272                        # D36: 0.7 x settled world FOOD output per person (docs/calibration.md); was 0.15
+  wealth_spend_rate: 0.25              # c_w: share of household cash H spent each turn (calibrated, was 0.10; docs/calibration.md)
 
 # --- §6.4: trade ----------------------------------------------------------
 trade:
@@ -52,8 +52,8 @@ trade:
 # --- §6.5: prices and inflation ------------------------------------------
 prices:
   initial_price: 1.0                   # every (country, good) at the start of burn-in
-  sigma_p: 0.3
-  max_change_per_turn: 0.20            # +/- cap on the price change per turn
+  sigma_p: 0.1                         # calibrated, was 0.3 (docs/calibration.md)
+  max_change_per_turn: 0.05            # +/- cap on the price change per turn (calibrated, was 0.20)
   # CPI uses the fixed base-period consumption shares (demand.consumption_shares_*).
 
 # --- §6.5 / §6.14: stocks -------------------------------------------------
@@ -66,7 +66,7 @@ spoilage:                              # share of stock lost per turn (SERVICES 
 # --- §6.6: labor market ---------------------------------------------------
 labor:
   psi: 0.5                             # wage response to excess labor demand
-  max_wage_change_per_turn: 0.10
+  max_wage_change_per_turn: 0.20      # calibrated, was 0.10 (docs/calibration.md)
 
 # --- §6.7: government budget, debt, default ------------------------------
 fiscal:
@@ -82,6 +82,8 @@ fiscal:
   gdp_ma_turns: 4
   gdp_floor_share_of_start: 0.10
   premium_cap: 0.20                    # annual, total premium (debt premium + default premium)
+  # D37: treasury cash above this many quarters of outlays repays debt (or goes to households)
+  treasury_buffer_quarters: 0.5
 
 # --- §6.8: monetary policy ------------------------------------------------
 monetary:

@@ -338,7 +338,7 @@ Check: A=2, L=100, E=100, β=0.5, γ=0.3 → Q = 79.6; L=200 → 112.6 (+41%, di
 
 Household spendable money (from last turn, see §6.7–6.8). Households spend their non-saved income
 **plus a slice of their accumulated cash `H_i`** (the savings stock in the ledger):
-`Y_spend_i = Y_disp_i · (1 − s_i) + c_w · H_i`, with `c_w = 0.10` per turn.
+`Y_spend_i = Y_disp_i · (1 − s_i) + c_w · H_i`, with `c_w = 0.10` per turn (calibrated to 0.25 in Phase 2 completion, see `docs/calibration.md`).
 `H_i' = H_i + s_i · Y_disp_i − c_w · H_i` (the saved part goes in, the spent slice goes out).
 **Why this term exists:** without it, savings are a one-way leak, nominal income shrinks every
 turn, and the whole economy slowly dies for no real reason. A toy test (one closed country, 60 turns)
@@ -348,15 +348,18 @@ In a steady state `H* = s·Y / c_w` and spending equals income, so the loop clos
 D[i,g] = share[i,g] · Y_spend_i / P[i,g]
 D[i,FOOD] = max(D[i,FOOD], f_min · pop_i)          # minimum food need (our addition)
 ```
+**f_min (D36)** = 0.7 × world FOOD output per person at the settled starting state (after burn-in,
+computed with the floor off). Arithmetic in `docs/calibration.md`.
 If the food floor binds, scale down the other goods' spending so total spending ≤ Y_spend.
 Government purchases: military spending buys GOODS domestically, `D_gov[i,GOODS] = military_i / P[i,GOODS]`.
 The **total** demand used in trade (§6.4), prices (§6.5) and consumption is
 `D[i,GOODS] = D_house[i,GOODS] + D_gov[i,GOODS]`. Military goods leave the stock (they go into `Mil`, §6.10).
-**Energy refill (D30):** `D[i,ENERGY] = D_house[i,ENERGY] + Σ_g E_d[i,g]`, where `E_d` is this turn's
+**Energy refill (D30, D39):** `D[i,ENERGY] = D_house[i,ENERGY] + Σ_g E_d[i,g] / (1 − δ_ENERGY)`, where `E_d` is this turn's
 planned firm input demand (before rationing, §6.2), used as next turn's expectation. The firm part is
 stock-building: it is delivered into the ENERGY stock, never consumed, so the stock-flow identity
 (§6.14) is unchanged. It enters `D_eff` in the price rule and lowers an exporter's surplus `X` (an
-energy exporter keeps what its own firms need).
+energy exporter keeps what its own firms need). Dividing by `1 − δ_ENERGY` (spoilage 0.05, D39) plans
+the stock so that after spoilage it still covers `E_d`.
 **Buyers and rationing (D34):** each buyer of good g (households, the government for military GOODS,
 the country's ENERGY firm account for the stock-building part) pays its share of demand for imports
 and home purchases. When a good is short, every buyer gets the same fill rate `min(1, available/D)`.
@@ -417,7 +420,7 @@ P'[i,g] = P[i,g] · (1 + clip(σ_p · (D_eff[i,g] − S_eff[i,g]) / (S_eff[i,g] 
 requests that rationing cut). **Why:** the old rule `S_dom − exports` made an exporter that sold its whole
 surplus look "balanced", so its price never rose. A toy test (A makes 100, home demand 40, B asks 100):
 old rule → exporter price +0%, new rule → +12%. Importers are unchanged (unmet need still pushes
-price up). `D[i,GOODS]` here already includes `D_gov` (§6.3). `σ_p = 0.3`. The ±20% cap per turn is our safety limit. SERVICES is non-traded:
+price up). `D[i,GOODS]` here already includes `D_gov` (§6.3). `σ_p = 0.3`. The ±20% cap per turn is our safety limit. (Calibrated to `σ_p = 0.1` and ±5% in `world.yaml`; the checks below use 0.3 and ±20%. See `docs/calibration.md`.) SERVICES is non-traded:
 `S_eff = Q` (no stock, perishable, no imports).
 Check: P=10, S=100, D=150 → 11.5; D=300 → capped at 12. With fixed supply 100 and spending
 1000, the price converges to 10.
@@ -432,6 +435,7 @@ employed_i = min(LF_i, Σ_g L_d[i,g])
 u_i        = 1 − employed_i / LF_i
 w'_i       = w_i · (1 + clip(ψ · (Σ_g L_d[i,g] − LF_i) / LF_i, −0.10, +0.10))
 ```
+(The ±0.10 wage cap is calibrated to ±0.20 in `world.yaml`; see `docs/calibration.md`.)
 `ψ = 0.5`. Pandemic shocks lower `LF` temporarily.
 
 ### 6.7 Government budget, debt, default
@@ -452,6 +456,12 @@ Taxes are a ledger transfer from households to the government, collected in the 
 private losses (§6.9). GDP is used only for spending shares and, through `GDP_ref`, debt ratios.
 Spending actions are set as shares of GDP and converted to credits at resolution time (last turn's
 GDP, floored at 0). The floor share, window and cap are config values (`world.yaml: fiscal`).
+**Money loop (D37),** every turn after borrowing and the default check, both logged ledger transfers:
+(b) treasury cash above `0.5 ×` this turn's outlays repays debt (government → bond_market); if debt is
+0, the rest goes to the country's households as a lump sum. Then (a) any positive `bond_market`
+balance is paid to households of all countries pro rata to their cash `H` (by population if all
+`H` = 0); the bond market may stay negative (it is the money issuer). Both payments count as household
+transfers in `Y_disp`. Buffer in `world.yaml: fiscal.treasury_buffer_quarters`.
 **Default:** if `debt / (4·GDP_ref) > 1.5` (param), then: debt × 0.5 (haircut, paid by the bond
 market account), stability −20, `default_premium += 0.05` for 8 turns, and while in default
 a country cannot set spending such that `outlays > revenue` (validator enforces this).
@@ -570,7 +580,13 @@ keep the checkpoint, never "continue anyway".
 
 Before turn 1, run `burn_in_turns = 8` turns with the `status_quo` bot for every country and
 no shocks, starting from prices 1.0 and rough stocks/wages. Discard the burn-in history and
-start the game from the settled state. Phase 4 must document in `docs/calibration.md`:
+start the game from the settled state.
+**D38:** during burn-in stability is held at its starting value and has no effects (no unrest, leader
+fall or default stability hit), and firm dynamics (breakup, entry, exit) are off, so the burn-in
+draws no random numbers and the settled state is the same for every seed. After burn-in: turn 0,
+stability reset to its starting value, a fresh ledger at the settled balances, `GDP_start` (D32) =
+settled GDP. Code: `world/engine/burn_in.py`; the tests load the saved settled state
+`tests/fixtures/settled_state.pkl` (a test checks it still matches a fresh burn-in). Phase 4 must document in `docs/calibration.md`:
 prices converge with no shocks; Phillips sign (higher u → lower wage growth); Okun sign
 (higher u ↔ lower GDP growth); no country collapses under status-quo bots in 14 turns;
 each country's importance is visible (an energy cut by DORNE measurably hurts BRONTIA output).
@@ -1149,6 +1165,10 @@ Video rule: record replays of finished runs. Never run live.
 | D33 | Firm losses: profit may be negative; owners absorb it (households from their cash, never below 0, then the `bond_market`; the treasury for state firms). Firm accounts end every turn at 0. `H_i` = household ledger balance. Policies set this turn apply to this turn's resolution; income earned this turn is spent next turn (§6.9) | Locked (owner decision 2026-10-06) |
 | D34 | Who pays (assistant, under the D33 rule "keep the ledger closed"): every buyer of a good (households; government for military GOODS; the ENERGY firm account for the D30 stock-building part) pays its demand share of imports and home purchases; a government's share of its own tariff moves nothing; short goods give every buyer the same fill rate; `R̂` = sales − energy imported for stock (§6.3, §6.4, §6.9) | Added by assistant, change if unwanted |
 | D35 | Household budget (assistant, to keep `H ≥ 0`, §6.14): `Y_spend` clipped to `[0, H + wages·(1 − tax)]`; home purchases only with what is left after import bills; a logged bond-market backstop tops `H` up to 0 if import bills alone exceed the budget (never fires in status-quo runs). Spending plans use `max(last GDP, 0)`; welfare/GDP in stability uses `max(GDP, GDP floor)` (§6.3, §6.11) | Added by assistant, change if unwanted |
+| D36 | Food floor: `f_min` = 0.7 × FOOD output per person at the settled starting state (computed in `docs/calibration.md`); the floor should bind only in a food shock (§6.3) | Locked (owner decision 2026-10-06). **Open:** with the world average, the floor binds in 4 of 6 countries at the settled state; see calibration.md |
+| D37 | Money loop: (a) positive `bond_market` balance paid to households pro rata to `H`; (b) treasury cash above 0.5 quarters of outlays repays debt, then goes to households as a lump sum once debt is 0. Logged ledger transfers (§6.7) | Locked (owner decision 2026-10-06) |
+| D38 | Burn-in implemented (§6.15): 8 status-quo turns, no shocks, stability held and without effects, firm dynamics off; then reset stability, discard history; settled state saved as a test fixture. Stability is reset to each country's configured start (70; FALKEN 60, CERES 65 per §4.3) | Locked (owner decision 2026-10-06) |
+| D39 | Energy spoilage: firm energy stock planned as `E_d / (1 − spoilage_ENERGY)` (§6.3) | Locked (owner decision 2026-10-06) |
 
 ---
 

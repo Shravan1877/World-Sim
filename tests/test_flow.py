@@ -1,32 +1,43 @@
-"""Circular-flow check (D28, D30-D33): 60 turns, fixed policies, no shocks.
+"""Circular-flow check (owner's done-when, Phase 2 completion). Do not loosen these bands.
 
-The economy must neither die nor blow up. Bands (our choice, relative to the starting state):
-  world nominal GDP      within [0.5, 2.0] x its start, every turn
-  each country's GDP     at least 0.25 x its start, every turn ("no country dies")
-  ENERGY stock           each country in [0, 10 x start]; world at least 0.25 x start
+After burn-in (D38), 60 turns, no shocks, status quo, 20 seeds:
+- every country's GDP stays between 50% and 200% of its start value
+- all prices between 0.5 and 2.0
+- unemployment below 25%, stability between 40 and 90
+- bond_market and treasury balances stay bounded (our bound: |bond_market| <= 2 x starting world
+  quarterly GDP; each treasury <= 2 x its country's starting quarterly GDP)
+- all invariants hold (step() raises otherwise), money conserved to 1e-9
 """
 
 import numpy as np
+import pytest
 
 from tests.runs import run
+from world.engine.invariants import check_money
+from world.ledger import BOND_MARKET
 
 TURNS = 60
 
 
-def test_nominal_gdp_and_energy_stay_in_a_sane_band() -> None:
-    _, states, _ = run(1, TURNS)
+@pytest.mark.parametrize("seed", range(1, 21))
+def test_status_quo_economy_stays_sane(seed: int) -> None:
+    _, states, _ = run(seed, TURNS)
     start = states[0]
-    world0 = start.gdp.sum()
-    e0 = start.stock[:, 1]
     bad = []
     for s in states[1:]:
-        ratio = s.gdp.sum() / world0
-        if not 0.5 <= ratio <= 2.0:
-            bad.append(f"t{s.turn}: world GDP x{ratio:.2f}")
-        dead = np.nonzero(s.gdp < 0.25 * start.gdp)[0]
-        if dead.size:
-            bad.append(f"t{s.turn}: GDP below 25% of start in countries {dead.tolist()}")
-        e = s.stock[:, 1]
-        if np.any(e < 0) or np.any(e > 10 * e0) or e.sum() < 0.25 * e0.sum():
-            bad.append(f"t{s.turn}: ENERGY stock out of band {np.round(e / e0, 2).tolist()}")
-    assert not bad, "\n".join(bad[:12]) + (f"\n... {len(bad)} problems in total" if len(bad) > 12 else "")
+        t = f"t{s.turn}"
+        g = s.gdp / start.gdp
+        if np.any(g < 0.5) or np.any(g > 2.0):
+            bad.append(f"{t}: GDP/start {np.round(g, 2).tolist()}")
+        if s.price.min() < 0.5 or s.price.max() > 2.0:
+            bad.append(f"{t}: prices in [{s.price.min():.3f}, {s.price.max():.3f}]")
+        if np.any(s.unemployment >= 0.25):
+            bad.append(f"{t}: unemployment {np.round(s.unemployment, 3).tolist()}")
+        if np.any(s.stability < 40) or np.any(s.stability > 90):
+            bad.append(f"{t}: stability {np.round(s.stability, 1).tolist()}")
+        if abs(s.ledger.balance(BOND_MARKET)) > 2 * start.gdp.sum():
+            bad.append(f"{t}: bond_market {s.ledger.balance(BOND_MARKET):.2f}")
+        if np.any(s.treasury > 2 * start.gdp):
+            bad.append(f"{t}: treasury/start GDP {np.round(s.treasury / start.gdp, 2).tolist()}")
+        assert check_money(s.ledger, 1e-9) == []
+    assert not bad, "\n".join(bad[:10]) + (f"\n... {len(bad)} problems in total" if len(bad) > 10 else "")

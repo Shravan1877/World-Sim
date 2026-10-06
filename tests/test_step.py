@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 from world.config import load_config, load_scenario
-from world.engine.state import GOODS, WorldState, initial_state
+from world.engine.burn_in import load_fixture
+from world.engine.state import GOODS, WorldState
 from world.engine.step import TurnInputs, step, turn_start
 from world.ledger import firms as firm_account
 from world.ledger import government
@@ -16,7 +17,7 @@ FALKEN = 3
 
 
 def _run(seed: int, turns: int, policy=None) -> tuple[WorldState, list, list]:
-    s = initial_state(CFG, seed)
+    s = load_fixture(seed)  # the settled state after burn-in (D38)
     rng = RngBundle(seed)
     starts, logs = [], []
     for _ in range(turns):
@@ -70,7 +71,7 @@ def test_common_random_numbers_across_policies() -> None:
 
 
 def test_nationalized_profits_go_to_treasury() -> None:
-    s = initial_state(CFG, 1)
+    s = load_fixture(1)
     rng = RngBundle(1)
     s, _ = turn_start(s, rng, CFG, shocks_on=False)
     s.nationalized = s.nationalized.copy()
@@ -93,21 +94,22 @@ def test_nationalized_profits_go_to_treasury() -> None:
 
 
 def test_antitrust_input_cuts_markup_this_turn() -> None:
-    s = initial_state(CFG, 1)
+    s = load_fixture(1)
     rng = RngBundle(1)
     s, _ = turn_start(s, rng, CFG, shocks_on=False)
     k = np.zeros((6, 5), dtype=int)
     k[5, 3] = 1  # EVERMERE antitrust on TECH (e = 0.30)
     _, base = step(s, None, rng, CFG)
     _, cut = step(s, TurnInputs(antitrust=k), rng, CFG)
-    ratio = cut.extra["labor_demand"] / base.extra["labor_demand"]
-    assert ratio[5, 3] == pytest.approx((1 - 0.5 * 0.7) / (1 - 0.5))  # (1 - mu) goes 0.5 -> 0.65
-    ratio[5, 3] = 1.0
-    np.testing.assert_allclose(ratio, 1.0)  # nothing else changes in this turn's hiring plans
+    b, c = base.extra["labor_demand"], cut.extra["labor_demand"]
+    assert c[5, 3] / b[5, 3] == pytest.approx((1 - 0.5 * 0.7) / (1 - 0.5))  # (1 - mu) goes 0.5 -> 0.65
+    c, b = c.copy(), b.copy()
+    c[5, 3] = b[5, 3]
+    np.testing.assert_array_equal(c, b)  # nothing else changes in this turn's hiring plans
 
 
 def test_military_uses_falken_efficiency() -> None:
-    s = initial_state(CFG, 1)
+    s = load_fixture(1)
     rng = RngBundle(1)
     s, _ = turn_start(s, rng, CFG, shocks_on=False)
     out, log = step(s, None, rng, CFG)

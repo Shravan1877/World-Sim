@@ -16,7 +16,23 @@ keeps them in the repo.
 
 After these changes every §6.14 invariant holds: 14 turns × 20 seeds, with and without shocks.
 
-## Still open: the economy does not settle (needs owner decisions, Phase 4 calibration)
+## Update after D36–D39 and calibration pass 1 (2026-10-06)
+
+F1–F4 below were answered by D36 (food floor), D37 (money loop), D38 (burn-in) and D39 (energy
+spoilage), plus one yaml calibration pass. Results and the current per-turn table are in
+`docs/calibration.md`. Still open:
+- **O1 (D36):** 70% of *world* food output per person (f_min = 0.0272) binds in 4 of 6 countries at the
+  settled state. 70% of the lowest country's food demand per person would be 0.0144.
+- **O2:** the 8-turn burn-in does not settle: energy importers still have 20–28% ENERGY shortages, and
+  BRONTIA's ENERGY sector has zero revenue. Stability then falls to 0–30 in turns 1–3.
+- **O3 (§6.4 trade structure):** imports only fill gaps and exports never compete with home goods, so
+  energy importers lose money every turn until they shrink to ~50% of their starting GDP.
+- **O4 (§6.8):** savings interest is new money from the bond market, and higher inflation raises `r`,
+  so the loop can run away. The price cap 0.05 hides it under status quo; shocks or agents may not.
+
+The sections below are the history before D36–D39 (old parameters).
+
+## Still open: the economy does not settle (before D36–D39) (needs owner decisions, Phase 4 calibration)
 
 The engine is internally consistent (money, goods and the income identity all close to 1e-9), but
 with the current parameters the status-quo economy collapses in the first turns and never settles.

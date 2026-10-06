@@ -122,6 +122,7 @@ class FiscalCfg(Strict):
     gdp_ma_turns: Annotated[int, Field(ge=1)]
     gdp_floor_share_of_start: Probability
     premium_cap: NonNegative
+    treasury_buffer_quarters: NonNegative
 
 
 class MonetaryCfg(Strict):

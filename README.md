@@ -24,11 +24,11 @@ uv run ruff check
   (`world/ledger.py`), vectorized world state + initial state + state hash
   (`world/engine/state.py`), production, demand and prices (`world/engine/`).
 - **Phase 2 (full economy step): code complete, NOT done.** Trade, labor, fiscal, monetary,
-  stability, invariant checks, `step()`, and the income step (`world/engine/income.py`: wages,
-  energy inputs, profits and losses, taxes). Owner decisions D30–D33 and assistant choices D34–D35
-  are wired in. Every §6.14 invariant holds over 14 turns × 20 seeds, and the income identity
-  closes to 1e-9. **Blocked:** the economy does not settle under status-quo policies (food floor ≈ 4×
-  world food output, money draining into the bond market, stability crash in turn 1), so the 60-turn
-  flow test and the energy-starvation test fail. See `docs/open_issues.md`.
+  stability, invariant checks, `step()`, the income step (`world/engine/income.py`), the money loop
+  (`world/engine/recycle.py`) and the burn-in (`world/engine/burn_in.py`, saved settled state in
+  `tests/fixtures/`). Decisions D30–D39 are wired in, and every §6.14 invariant holds. **Blocked:**
+  the status-quo economy does not stay in the owner's bands after burn-in. Energy importers shrink to
+  ~50% of their starting GDP, prices range 0.19–2.15, and stability collapses in turns 1–3. See
+  `docs/calibration.md` and `docs/open_issues.md`.
 - **Phase 3 (firms, shocks, trust): built.** The 14-turn × 20-seed invariant test with shocks and
-  the energy_crunch scenario now passes. It waits on the Phase 2 blocker above.
+  the energy_crunch scenario passes (from the settled state). It waits on the Phase 2 blocker above.

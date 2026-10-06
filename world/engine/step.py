@@ -36,6 +36,7 @@ from world.engine import fiscal, income, invariants, labor, military, monetary, 
 from world.engine import stability as stab_mod
 from world.engine import trust as trust_mod
 from world.engine.params import country_params
+from world.engine.recycle import recycle
 from world.engine.state import ENERGY, FOOD, GOODS, N_TRADED, SERVICES, ActiveShock, Event, WorldState
 from world.engine.trade import ContractDelivery, SupplyContract, allocate_trade
 from world.ledger import BOND_MARKET, LedgerError, government, households
@@ -155,21 +156,25 @@ def payer_weights(
 
 
 def step(
-    state: WorldState, inputs: TurnInputs | None, rng: RngBundle, cfg: Config
+    state: WorldState, inputs: TurnInputs | None, rng: RngBundle, cfg: Config, *, burn_in: bool = False
 ) -> tuple[WorldState, TurnLog]:
     """Resolve the turn that turn_start() began (state.turn). Returns (new_state, log).
+
+    burn_in=True (§6.15, D38): stability is held and has no effects (no unrest, leader fall or
+    default stability hit), and firm dynamics (breakup, entry, exit) are off, so the burn-in uses
+    no random draws at all.
 
     Raises InvariantError if any §6.14 invariant fails, including a money transfer that is not
     finite (the ledger refuses it). The run must then stop and be marked invariant_failed.
     """
     try:
-        return _step(state, inputs, rng, cfg)
+        return _step(state, inputs, rng, cfg, burn_in)
     except LedgerError as e:
         raise invariants.InvariantError(f"turn {state.turn}: {e}") from e
 
 
 def _step(
-    state: WorldState, inputs: TurnInputs | None, rng: RngBundle, cfg: Config
+    state: WorldState, inputs: TurnInputs | None, rng: RngBundle, cfg: Config, burn_in: bool
 ) -> tuple[WorldState, TurnLog]:
     w = cfg.world
     cp = country_params(cfg)
@@ -232,7 +237,8 @@ def _step(
         state.consumption_shares, y_spend, P, w.demand.f_min, state.population
     )
     d_gov = demand_mod.government_goods_demand(military_c, P[:, GOODS])
-    d_firm_energy = prod.energy_demand.sum(axis=1)
+    # D39: plan the firm energy stock so that after ENERGY spoilage it still covers E_d.
+    d_firm_energy = prod.energy_demand.sum(axis=1) / (1.0 - w.spoilage[SECTORS[ENERGY]])
     D = demand_mod.total_demand(d_house, d_gov, d_firm_energy)
     payers = payer_weights(d_house, d_gov, d_firm_energy, D)
 
@@ -375,7 +381,21 @@ def _step(
         eps=eps,
     )
     events += [Event("default", i, detail="debt haircut") for i in np.nonzero(dflt.defaulted)[0]]
-    y_disp = fiscal.disposable_income(inc.wages, inc.profits_to_households, inc.taxes, welfare_c, sav_int)
+
+    # D37 money loop: treasury surplus repays debt (or goes to households); bond-market surplus
+    # goes to households. Both count as household income (transfers) in Y_disp.
+    outlays = welfare_c + military_c + subsidy.sum(axis=1) + interest
+    rc = recycle(
+        led,
+        debt=dflt.debt,
+        outlays=outlays,
+        buffer_quarters=w.fiscal.treasury_buffer_quarters,
+        population=state.population,
+    )
+    led = rc.ledger
+    y_disp = fiscal.disposable_income(
+        inc.wages, inc.profits_to_households, inc.taxes, welfare_c + rc.lump_sum + rc.bond_payout, sav_int
+    )
 
     # ---- 10 monetary
     m = w.monetary
@@ -385,8 +405,8 @@ def _step(
     rate = monetary.policy_rate(taylor, state.policy_rate_override)
     saving = monetary.saving_rate(rate, s0=m.s0, k_r=m.k_r, r_n=m.r_n, s_min=m.saving_min, s_max=m.saving_max)
 
-    # ---- 11 firms (FIRMS stream)
-    fu = firms_mod.update_firms(
+    # ---- 11 firms (FIRMS stream; frozen during burn-in)
+    fu = _frozen_firms(state) if burn_in else firms_mod.update_firms(
         firm_lists=state.firms,
         nationalized=state.nationalized,
         dominance_age=state.dominance_age,
@@ -423,6 +443,9 @@ def _step(
     )
     stab = stab_mod.update_stability(dflt.stability, d_stab, w.stability)
     ur = stab_mod.unrest_and_leader_fall(stab, cp.leader_fall_prob, w.stability, rng, t)
+    if burn_in:  # D38: stability held, no effects
+        no = np.zeros(n_c, dtype=bool)
+        ur = stab_mod.UnrestResult(state.stability.copy(), no, no.copy())
     stab, new_shocks = ur.stability, []
     leader_changes, leader_turn = state.leader_changes, state.leader_changed_turn
     for i in np.nonzero(ur.unrest)[0]:
@@ -460,7 +483,7 @@ def _step(
     s.markup, s.n_firms, s.firms, s.dominance_age = fu.markup, fu.n_firms, fu.firms, fu.dominance_age
     s.demand, s.shortage = D, shortage
     s.wage, s.unemployment = new_wage, u
-    s.debt, s.default_premium, s.default_turns_left = dflt.debt, dflt.default_premium, dflt.default_turns_left
+    s.debt, s.default_premium, s.default_turns_left = rc.debt, dflt.default_premium, dflt.default_turns_left
     s.gdp_prev, s.gdp, s.gdp_hist = state.gdp, gdp, gdp_hist
     s.cpi_prev, s.cpi, s.inflation_q = state.cpi, new_cpi, infl_q
     s.policy_rate, s.saving_rate, s.y_disp = rate, saving, y_disp
@@ -515,11 +538,28 @@ def _step(
             "household_backstop": backstop,
             "household_unbought": unbought,
             "gdp_ref": gdp_ref,
+            "debt_repaid": rc.repaid,
+            "treasury_lump_sum": rc.lump_sum,
+            "bond_payout": rc.bond_payout,
             "unrest": ur.unrest,
             "leader_falls": ur.leader_falls,
         },
     )
     return s, log
+
+
+def _frozen_firms(state: WorldState) -> firms_mod.FirmsUpdate:
+    """Burn-in (D38): no breakups, entry or exit, and no dice drawn."""
+    n_c, n_s = state.n_firms.shape
+    return firms_mod.FirmsUpdate(
+        firms=state.firms,
+        n_firms=state.n_firms.copy(),
+        dominance_age=state.dominance_age.copy(),
+        markup=state.markup.copy(),
+        hhi=firms_mod.hhi_matrix(state.firms, n_s),
+        events=(),
+        dice=np.zeros((n_c, n_s, firms_mod.N_DICE)),
+    )
 
 
 def _energy_inputs(E: np.ndarray) -> np.ndarray:

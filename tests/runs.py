@@ -1,9 +1,13 @@
-"""Shared helper for whole-game tests: run turn_start() + step() with fixed (status-quo) policies."""
+"""Shared helper for whole-game tests: run turn_start() + step() with fixed (status-quo) policies.
+
+Every game starts from the settled state after burn-in (D38), loaded from tests/fixtures.
+"""
 
 from __future__ import annotations
 
 from world.config import Config, ScenarioCfg, load_config
-from world.engine.state import WorldState, initial_state
+from world.engine.burn_in import load_fixture
+from world.engine.state import WorldState
 from world.engine.step import TurnLog, step, turn_start
 from world.rng import RngBundle
 
@@ -22,7 +26,7 @@ def run(
 
     step() raises InvariantError the moment any §6.14 invariant fails.
     """
-    s = initial_state(cfg, seed)
+    s = load_fixture(seed)
     rng = RngBundle(seed)
     states, logs = [s], []
     for _ in range(turns):
