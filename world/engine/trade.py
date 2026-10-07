@@ -1,24 +1,29 @@
-"""Armington-with-trust trade allocation, rationing and payments (CLAUDE.md §6.4).
+"""Armington-with-trust-and-home-bias market for every good (CLAUDE.md §6.4, D45).
 
-For each traded good g (FOOD, ENERGY, GOODS, TECH, SERVICES; D40). The number of goods is taken
-from the array shapes. SERVICES has no stock, so its S_dom is just Q.
-  S_dom[i]  = stock[i] + Q[i]                       (stock is AFTER energy inputs, §6.2)
-  X[j]      = max(S_dom[j] - D[j], 0)               exportable surplus
-  M[i]      = max(D[i] - S_dom[i], 0)               import need
-  export_cap[i, j] limits the share of j's surplus that may go to importer i
-  (DORNE's energy quota, CERES's food ban). A sanction either way blocks the pair.
-Step 1: supply contracts deliver first, at the contract price.
-Step 2: Armington shares over eligible exporters:
-        landed c[i,j] = P[j] (1 + levy[j]) (1 + tariff[i,j])
-        score = trust[i,j]^kappa * c^(1 - sigma);  request = share * M_remaining[i]
-Step 3: if requests to j exceed j's remaining surplus, scale them proportionally.
-Unmet requests get a second pass (steps 2-3) over exporters with surplus left; the rest is shortage.
+One market per good g (FOOD, ENERGY, GOODS, TECH, SERVICES; D40; the number of goods comes from the
+array shapes). Every buyer i spreads its WHOLE demand D[i,g] over its own home sellers and every
+eligible foreign seller j (no sanction either way, export cap > 0):
+  c[i,i]   = P[i]                                   home price (no tariff, no levy)
+  c[i,j]   = P[j] (1 + levy[j]) (1 + tariff[i,j])   landed price of an import
+  score    = trust[i,s]^kappa * c[i,s]^(1 - sigma) * (theta if s == i)   trust[i,i] = 1
+  request  = share * D_remaining[i]
+Order inside one good:
+  0. reserve: a seller first keeps its own reserved demand (the D30 firm energy stock-building
+     part) from its own supply: "an energy exporter keeps what its own firms need".
+  1. supply contracts deliver first, at the contract price.
+  2. pass 1: every seller rations ALL requests (home and foreign) proportionally against its
+     remaining supply S_dom = stock + Q (SERVICES: Q). Export caps (DORNE's quota, CERES's ban)
+     limit only the foreign part: buyer i may get at most export_cap[i,j] x S_dom[j] from j.
+  3. pass 2: unmet requests are spread again over sellers with supply left; then the rest is
+     a shortage.
+R_s = everything requested from seller s in step 0, 1 and pass 1 drives its price (§6.5).
 
-Payments (ledger): the importer pays c per unit; exporter firms get P[j]; the exporter's
-government gets the levy part; the importer's government gets the tariff part. Contract
-deliveries are paid at the contract price, all to the seller's firms (no tariff or levy).
+Payments (ledger): imports are paid here: the buyer pays c per unit; exporter firms get P[j]; the
+exporter's government gets the levy part; the importer's government gets the tariff part. Contract
+deliveries are paid at the contract price, all to the seller's firms. Home purchases are paid by
+step() (it applies the household budget, D35); this module only returns their quantities.
 
-Who is "the importer" (D34): the buyers of good g in country i split every payment by their share
+Who is "the buyer" (D34): the buyers of good g in country i split every payment by their share
 of total demand: households (D_house), the government (military GOODS, D_gov) and the country's own
 ENERGY firm account (the stock-building firm part of ENERGY demand, D30). `payer_weights[i, g]`
 holds those three shares; without it, households pay for everything.
@@ -56,12 +61,13 @@ class ContractDelivery:
 
 @dataclass(frozen=True)
 class TradeResult:
-    flows: np.ndarray  # (6, 6, 4): flows[i, j, g] = units of g from exporter j to importer i
-    imports: np.ndarray  # (6, 4)
-    exports: np.ndarray  # (6, 4)
-    export_requests: np.ndarray  # (6, 4): X_req, all requests over both passes, before rationing
-    unmet_imports: np.ndarray  # (6, 4): import need left after both passes
-    surplus: np.ndarray  # (6, 4): X before trade
+    flows: np.ndarray  # (6, 6, G): flows[i, j, g] = units of g from foreign seller j to buyer i (diag 0)
+    home: np.ndarray  # (6, G): units each country bought from its own sellers (incl. the reserve)
+    imports: np.ndarray  # (6, G)
+    exports: np.ndarray  # (6, G)
+    requests: np.ndarray  # (6, G): R_s, all requests a seller received in reserve, contracts, pass 1
+    unmet: np.ndarray  # (6, G): demand left after both passes (shortage before the budget rule)
+    supply: np.ndarray  # (6, G): S_dom = stock + Q
     deliveries: tuple[ContractDelivery, ...]
     ledger: Ledger
 
@@ -72,20 +78,26 @@ def landed_cost(price: np.ndarray, levy: np.ndarray, tariff: np.ndarray) -> np.n
 
 
 def blocked_pairs(sanction: np.ndarray) -> np.ndarray:
-    """(6, 6) bool: True where trade is impossible (a sanction either way, or i == j)."""
+    """(6, 6) bool: True where foreign trade is impossible (a sanction either way, or i == j)."""
     blocked = sanction | sanction.T
     return blocked | np.eye(sanction.shape[0], dtype=bool)
 
 
 def armington_shares(
-    cost: np.ndarray, trust: np.ndarray, eligible: np.ndarray, kappa: float, sigma: float
+    cost: np.ndarray,
+    trust: np.ndarray,
+    eligible: np.ndarray,
+    kappa: float,
+    sigma: float,
+    home_bias: float = 1.0,
 ) -> np.ndarray:
-    """Row-wise shares: score = trust^kappa * cost^(1 - sigma) over eligible exporters.
+    """Row-wise shares: score = trust^kappa * cost^(1 - sigma) (* home_bias on the diagonal).
 
-    cost, trust, eligible have shape (n_importers, n_exporters). Rows with no eligible exporter
-    get all-zero shares.
+    cost, trust, eligible have shape (n_buyers, n_sellers). Rows with no eligible seller get
+    all-zero shares.
     """
-    score = np.where(eligible, np.power(trust, kappa) * np.power(cost, 1.0 - sigma), 0.0)
+    bias = np.where(np.eye(cost.shape[0], cost.shape[1], dtype=bool), home_bias, 1.0)
+    score = np.where(eligible, np.power(trust, kappa) * np.power(cost, 1.0 - sigma) * bias, 0.0)
     total = score.sum(axis=1, keepdims=True)
     return np.where(total > 0, score / np.where(total > 0, total, 1.0), 0.0)
 
@@ -144,49 +156,62 @@ def allocate_trade(
     contracts: tuple[SupplyContract, ...] | list[SupplyContract],
     ledger: Ledger,
     payer_weights: np.ndarray | None = None,
+    home_bias: float = 1.0,
+    reserve: np.ndarray | None = None,
 ) -> TradeResult:
-    """Run §6.4 for all traded goods. Array inputs are the traded columns: (6, 4) or (6, 6, 4).
+    """Run §6.4 (D45) for all goods. Arrays are (6, G) or (6, 6, G).
 
-    payer_weights (6, 4, 3): who pays for country i's purchases of good g (see module doc).
-    Returns a new ledger; the input ledger is not changed.
+    reserve (6, G): demand a country takes from its own supply before anyone else (the D30 firm
+    energy part); it is part of `demand`. payer_weights (6, G, 3): who pays for the non-reserved
+    purchases. Returns a new ledger; the input ledger is not changed.
     """
     n, n_goods = stock.shape
     ledger = ledger.copy()
     if payer_weights is None:
         payer_weights = np.zeros((n, n_goods, N_PAYERS))
         payer_weights[:, :, 0] = 1.0
-    s_dom = stock + output
-    surplus = np.maximum(s_dom - demand, 0.0)
-    need = np.maximum(demand - s_dom, 0.0)
-    cost = landed_cost(price, levy, tariff)
-    open_pair = ~blocked_pairs(sanction)
+    reserve = np.zeros((n, n_goods)) if reserve is None else reserve
+    supply = stock + output
+    cost_all = landed_cost(price, levy, tariff)
+    eye = np.eye(n, dtype=bool)
+    open_pair = ~blocked_pairs(sanction)  # foreign pairs that may trade
+    trust_h = np.where(eye, 1.0, trust)
 
     flows = np.zeros((n, n, n_goods))
+    home = np.zeros((n, n_goods))
     requests = np.zeros((n, n_goods))
     unmet = np.zeros((n, n_goods))
     deliveries: list[ContractDelivery] = []
 
     for g in range(n_goods):
-        pair_rem = export_cap[:, :, g] * surplus[None, :, g]  # [i, j]: what j may still send to i
-        x_rem = surplus[:, g].copy()
-        m_rem = need[:, g].copy()
+        s_rem = supply[:, g].copy()
+        d_rem = demand[:, g].copy()
+        cost = np.where(eye, price[:, g][:, None], cost_all[:, :, g])
+        cap_rem = np.where(eye, np.inf, export_cap[:, :, g] * supply[None, :, g])
+
+        # Step 0: own reserve (home firm energy stock-building).
+        kept = np.minimum(np.minimum(reserve[:, g], s_rem), d_rem)
+        requests[:, g] += reserve[:, g]
+        home[:, g] += kept
+        s_rem -= kept
+        d_rem -= kept
 
         # Step 1: supply contracts.
         for c in (c for c in contracts if c.good == g):
             requests[c.seller, g] += c.quantity
             allowed = bool(open_pair[c.buyer, c.seller])
-            q = min(c.quantity, x_rem[c.seller], pair_rem[c.buyer, c.seller]) if allowed else 0.0
+            q = min(c.quantity, s_rem[c.seller], cap_rem[c.buyer, c.seller]) if allowed else 0.0
             q = max(q, 0.0)
-            without_policy = min(c.quantity, x_rem[c.seller])
+            without_policy = min(c.quantity, s_rem[c.seller])
             shortfall = c.quantity - q
             deliveries.append(
                 ContractDelivery(c.treaty_id, q, shortfall, shortfall > 0 and q < without_policy)
             )
             if q > 0:
                 flows[c.buyer, c.seller, g] += q
-                x_rem[c.seller] -= q
-                pair_rem[c.buyer, c.seller] -= q
-                m_rem[c.buyer] = max(m_rem[c.buyer] - q, 0.0)
+                s_rem[c.seller] -= q
+                cap_rem[c.buyer, c.seller] -= q
+                d_rem[c.buyer] = max(d_rem[c.buyer] - q, 0.0)
                 _pay_split(
                     ledger,
                     c.buyer,
@@ -197,32 +222,36 @@ def allocate_trade(
                     f"contract {c.treaty_id}",
                 )
 
-        # Steps 2-3, repeated for each pass.
-        for _ in range(passes):
-            eligible = open_pair & (pair_rem > 0) & (x_rem[None, :] > 0) & (m_rem[:, None] > 0)
+        # Steps 2-3: two passes over home and foreign sellers.
+        for k in range(passes):
+            eligible = (eye | open_pair) & (cap_rem > 0) & (s_rem[None, :] > 0) & (d_rem[:, None] > 0)
             if not eligible.any():
                 break
-            shares = armington_shares(cost[:, :, g], trust, eligible, kappa, sigma)
-            req = shares * m_rem[:, None]
-            requests[:, g] += req.sum(axis=0)
-            granted = np.minimum(req, pair_rem)
+            shares = armington_shares(cost, trust_h, eligible, kappa, sigma, home_bias)
+            req = shares * d_rem[:, None]
+            if k == 0:
+                requests[:, g] += req.sum(axis=0)
+            granted = np.minimum(req, cap_rem)
             total = granted.sum(axis=0)
-            scale = np.where(total > x_rem, x_rem / np.where(total > 0, total, 1.0), 1.0)
+            scale = np.where(total > s_rem, s_rem / np.where(total > 0, total, 1.0), 1.0)
             granted = granted * scale[None, :]
-            flows[:, :, g] += granted
-            x_rem = np.maximum(x_rem - granted.sum(axis=0), 0.0)
-            pair_rem = np.maximum(pair_rem - granted, 0.0)
-            m_rem = np.maximum(m_rem - granted.sum(axis=1), 0.0)
-            _pay_imports(ledger, g, granted, price[:, g], levy[:, g], cost[:, :, g], payer_weights[:, g])
-        unmet[:, g] = m_rem
+            home[:, g] += np.diag(granted)
+            foreign = np.where(eye, 0.0, granted)
+            flows[:, :, g] += foreign
+            s_rem = np.maximum(s_rem - granted.sum(axis=0), 0.0)
+            cap_rem = np.maximum(cap_rem - granted, 0.0)
+            d_rem = np.maximum(d_rem - granted.sum(axis=1), 0.0)
+            _pay_imports(ledger, g, foreign, price[:, g], levy[:, g], cost_all[:, :, g], payer_weights[:, g])
+        unmet[:, g] = d_rem
 
     return TradeResult(
         flows=flows,
+        home=home,
         imports=flows.sum(axis=1),
         exports=flows.sum(axis=0),
-        export_requests=requests,
-        unmet_imports=unmet,
-        surplus=surplus,
+        requests=requests,
+        unmet=unmet,
+        supply=supply,
         deliveries=tuple(deliveries),
         ledger=ledger,
     )

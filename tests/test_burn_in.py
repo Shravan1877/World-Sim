@@ -47,5 +47,5 @@ def test_burn_in_settles() -> None:
 
     b = CFG.world.burn_in
     _, history = run_burn_in(CFG, 0)
-    assert settled_streak(history, b.settle_tol) >= b.settle_streak
+    assert settled_streak(history, b.settle_tol, b.settle_window) >= b.settle_streak
     assert b.min_turns <= len(history) - 1 <= b.max_turns

@@ -1,13 +1,9 @@
-"""Gradual price rule, CPI and inflation (CLAUDE.md §6.5, D28b).
+"""Gradual price rule, CPI and inflation (CLAUDE.md §6.5, D45). Pure functions.
 
-All functions are pure. Shapes: (6, 5) country x sector, (6, 4) for traded goods only.
-
-The price of good g in country i moves with post-trade excess demand:
-    D_eff = D + X_req          own demand + what foreign buyers asked from i (before rationing)
-    S_eff = S_dom + imports    own supply (stock after inputs + Q) + what i actually received
-    P'    = P * (1 + clip(sigma_p * (D_eff - S_eff) / (S_eff + eps), -cap, +cap))
-Every good is traded (D40). SERVICES is perishable and has no stock, so its S_dom = Q and
-S_eff = Q + imports. Export requests and imports may cover fewer goods than demand (older tests).
+Every seller's price moves with the requests it received against its supply (D45):
+    R_s = all quantity requested from seller s (its own buyers + foreign buyers, first pass)
+    S_s = S_dom = stock after inputs + Q        (SERVICES has no stock: S_s = Q)
+    P'  = P * (1 + clip(sigma_p * (R_s - S_s) / (S_s + eps), -cap, +cap))
 """
 
 from __future__ import annotations
@@ -15,24 +11,21 @@ from __future__ import annotations
 import numpy as np
 
 
-def market_balance(
-    demand: np.ndarray,
-    supply_domestic: np.ndarray,
-    output: np.ndarray,
-    export_requests: np.ndarray,
-    imports: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Build D_eff = D + X_req and S_eff = S_dom + imports (6, 5).
+def excess_demand(requests: np.ndarray, supply: np.ndarray, eps: float) -> np.ndarray:
+    """(R_s - S_s) / (S_s + eps): the relative excess demand a seller faces."""
+    return (requests - supply) / (supply + eps)
 
-    `output` is kept in the signature for callers; with no SERVICES stock, S_dom already equals Q there.
-    """
-    del output
-    n_tr = export_requests.shape[1]
-    d_eff = demand.astype(float).copy()
-    s_eff = supply_domestic.astype(float).copy()
-    d_eff[:, :n_tr] += export_requests
-    s_eff[:, :n_tr] += imports
-    return d_eff, s_eff
+
+def smooth_excess(excess: np.ndarray, previous: np.ndarray, weight: float) -> np.ndarray:
+    """D50: exponential average of excess demand; weight 1.0 = no smoothing."""
+    return weight * excess + (1.0 - weight) * previous
+
+
+def update_prices_from_excess(
+    price: np.ndarray, excess: np.ndarray, sigma_p: float, cap: float
+) -> np.ndarray:
+    """P' = P * (1 + clip(sigma_p * excess, -cap, +cap))."""
+    return price * (1.0 + np.clip(sigma_p * excess, -cap, cap))
 
 
 def price_change_rate(

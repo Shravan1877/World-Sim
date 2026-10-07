@@ -142,8 +142,9 @@ def payer_weights(
 ) -> np.ndarray:
     """(6, 5, 3) demand shares of each buyer of good g in country i (D34).
 
-    0 households (D_house), 1 government (military GOODS), 2 the ENERGY firm account (D30 firm part).
-    Where total demand is 0, households are the (notional) buyer.
+    0 households (D_house), 1 government (military GOODS), 2 the ENERGY firm account (the D30 firm
+    part not already kept from home stock). D is the demand these shares refer to.
+    Where that demand is 0, households are the (notional) buyer.
     """
     n_c, n_s = D.shape
     w = np.zeros((n_c, n_s, N_PAYERS))
@@ -240,7 +241,13 @@ def _step(
     # D39: plan the firm energy stock so that after ENERGY spoilage it still covers E_d.
     d_firm_energy = prod.energy_demand.sum(axis=1) / (1.0 - w.spoilage[SECTORS[ENERGY]])
     D = demand_mod.total_demand(d_house, d_gov, d_firm_energy)
-    payers = payer_weights(d_house, d_gov, d_firm_energy, D)
+    s_dom = prod.stock_after_inputs + Q  # SERVICES has no stock: S_dom = Q
+    # D45 step 0: the ENERGY firms keep their own planned stock from home supply first.
+    kept = np.zeros((n_c, n_s))
+    kept[:, ENERGY] = np.minimum(d_firm_energy, s_dom[:, ENERGY])
+    firm_rest = d_firm_energy - kept[:, ENERGY]
+    D_rest = D - kept
+    payers = payer_weights(d_house, d_gov, firm_rest, D_rest)
 
     # ---- 3 trade
     tr = allocate_trade(
@@ -259,39 +266,35 @@ def _step(
         contracts=inputs.contracts,
         ledger=led,
         payer_weights=payers[:, :N_TRADED],
+        home_bias=w.trade.home_bias,
+        reserve=kept[:, :N_TRADED],
     )
     led = tr.ledger
 
-    # ---- 4 consumption: every buyer of a good gets the same fill rate min(1, available / D) (D34).
-    # The firm part of ENERGY demand is filled into stock, not consumed (D30).
-    s_dom = prod.stock_after_inputs + Q
-    available = s_dom.copy()
-    available[:, :N_TRADED] += tr.imports - tr.exports
-    available = np.maximum(available, 0.0)
-    fill = np.where(D > 0, np.minimum(available / np.where(D > 0, D, 1.0), 1.0), 1.0)
-    taken = D * fill
-    shortage = D - taken
-    firm_energy_filled = d_firm_energy * fill[:, ENERGY]
-    consumption = taken.copy()
-    consumption[:, ENERGY] -= firm_energy_filled
+    # ---- 4 consumption = what each buyer actually got (D45). Apart from the reserve, every buyer
+    # of a good gets the same fill rate (D34). The firm part of ENERGY goes into stock (D30).
+    received = tr.home + tr.imports
+    fill = np.where(D_rest > 0, np.minimum((received - kept) / np.where(D_rest > 0, D_rest, 1.0), 1.0), 1.0)
+    fill = np.maximum(fill, 0.0)
+    firm_energy_filled = kept[:, ENERGY] + firm_rest * fill[:, ENERGY]
     gov_goods = d_gov * fill[:, GOODS]  # military goods actually received
-    imports5 = np.zeros((n_c, n_s))
-    imports5[:, :N_TRADED] = tr.imports
-    domestic = np.maximum(taken - imports5, 0.0)  # units bought from home firms (imports go first)
+    home_rest = np.maximum(tr.home - kept, 0.0)  # bought from home sellers beyond the reserve
     # D35: households buy home goods only with the budget left after paying for imports (landed
-    # costs can exceed home prices). Units they cannot pay for stay in stock and count as shortage.
-    house_dom = domestic * payers[:, :, 0]
+    # costs can exceed home prices). Units they cannot pay for stay with the home seller.
+    house_dom = home_rest * payers[:, :, 0]
     paid_for_imports = cash_start - np.array([led.balance(households(i)) for i in range(n_c)])
     left = np.maximum(budget - paid_for_imports, 0.0)
     want = (P * house_dom).sum(axis=1)
     afford = np.where(want > left, left / np.where(want > 0, want, 1.0), 1.0)
     unbought = house_dom * (1.0 - afford[:, None])
-    consumption -= unbought
-    shortage += unbought
+    consumption = received - unbought
+    consumption[:, ENERGY] -= firm_energy_filled
+    consumption = np.maximum(consumption, 0.0)
+    shortage = D - received + unbought
     for i in range(n_c):
         for g in range(n_s):
             house = P[i, g] * house_dom[i, g] * afford[i]
-            gov = P[i, g] * domestic[i, g] * payers[i, g, 1]
+            gov = P[i, g] * home_rest[i, g] * payers[i, g, 1]
             if house > 0:
                 led.transfer(households(i), firm_account(i, g), house, "domestic sales")
             if gov > 0:
@@ -306,9 +309,13 @@ def _step(
     new_stock = np.zeros((n_c, n_s))
     new_stock[:, :N_TRADED] = held - spoilage
 
-    # ---- 6 prices, CPI, inflation
-    d_eff, s_eff = prices.market_balance(D, s_dom, Q, tr.export_requests, tr.imports)
-    new_price = prices.update_prices(P, d_eff, s_eff, w.prices.sigma_p, w.prices.max_change_per_turn, eps)
+    # ---- 6 prices, CPI, inflation (D45: requests received by each seller vs its supply)
+    excess_ema = prices.smooth_excess(
+        prices.excess_demand(tr.requests, tr.supply, eps), state.excess_ema, w.prices.excess_smoothing
+    )  # D50 (weight 1.0 = the plain D45 rule)
+    new_price = prices.update_prices_from_excess(
+        P, excess_ema, w.prices.sigma_p, w.prices.max_change_per_turn
+    )
     new_cpi = prices.cpi(state.consumption_shares, new_price)
     infl_q = prices.inflation_quarterly(new_cpi, state.cpi)
     pi_annual = prices.annualize(infl_q, ppy)
@@ -475,10 +482,12 @@ def _step(
 
     # ---- 16 snapshot
     s.ledger = led
-    s.price, s.stock, s.output, s.revenue = new_price, new_stock, Q, revenue
+    lam = w.production.revenue_smoothing  # D46: R_hat = lam * R_last + (1 - lam) * R_hat_prev
+    s.price, s.stock, s.output = new_price, new_stock, Q
+    s.revenue = lam * revenue + (1.0 - lam) * state.revenue
     s.labor, s.energy_in, s.subsidy = L, E, subsidy
     s.markup, s.n_firms, s.firms, s.dominance_age = fu.markup, fu.n_firms, fu.firms, fu.dominance_age
-    s.demand, s.shortage = D, shortage
+    s.demand, s.shortage, s.excess_ema = D, shortage, excess_ema
     s.wage, s.unemployment = new_wage, u
     s.debt, s.default_premium, s.default_turns_left = rc.debt, dflt.default_premium, dflt.default_turns_left
     s.gdp_prev, s.gdp, s.gdp_hist = state.gdp, gdp, gdp_hist
@@ -525,7 +534,8 @@ def _step(
             "energy_demand": prod.energy_demand,
             "energy_used": E,
             "firm_energy_filled": firm_energy_filled,
-            "surplus": tr.surplus,
+            "surplus": tr.supply - kept,  # supply left for others after the own-firm reserve
+            "requests": tr.requests,
             "y_spend": y_spend,
             "welfare": welfare_c,
             "subsidy": subsidy.sum(axis=1),

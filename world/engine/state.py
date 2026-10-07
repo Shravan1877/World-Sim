@@ -90,6 +90,7 @@ class WorldState:
     dominance_age: np.ndarray  # int: consecutive turns the largest firm share > s_max
     consumption_shares: np.ndarray  # fixed base-period budget shares (CPI weights)
     demand: np.ndarray  # D last turn (GOODS includes government purchases)
+    excess_ema: np.ndarray  # D50: exponential average of each seller's relative excess demand
     shortage: np.ndarray  # unmet demand last turn
     # --- (6,) country
     labor_force_base: np.ndarray
@@ -340,6 +341,7 @@ def initial_state(cfg: Config, seed: int) -> WorldState:
         dominance_age=np.zeros((N_COUNTRIES, N_SECTORS), dtype=np.int64),
         consumption_shares=shares,
         demand=zeros65.copy(),
+        excess_ema=zeros65.copy(),
         shortage=zeros65.copy(),
         labor_force_base=lf,
         labor_force=lf.copy(),

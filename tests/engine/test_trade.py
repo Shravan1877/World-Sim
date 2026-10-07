@@ -77,16 +77,17 @@ def test_sanction_blocks_both_ways(direction: str) -> None:
     assert r.imports[0, 0] == pytest.approx(100.0)  # others fill the need
 
 
-def test_rationing_never_exports_more_than_surplus() -> None:
+def test_rationing_never_sells_more_than_supply() -> None:
+    """D45: home sales + exports never exceed a seller's supply."""
     a = _setup()
-    a["demand"][[0, 4, 5], 0] = 900.0  # 2700 needed, 1300 + 0 surplus offered below
+    a["demand"][[0, 4, 5], 0] = 900.0  # 2700 needed, 1300 offered below (sellers have no home demand)
     a["output"][1:4, 0] = [500.0, 500.0, 300.0]
     r = allocate_trade(**a)
-    assert np.all(r.exports <= r.surplus + 1e-9)
-    np.testing.assert_allclose(r.exports[1:4, 0], [500.0, 500.0, 300.0])  # all surplus sold
-    assert r.unmet_imports[:, 0].sum() == pytest.approx(2700.0 - 1300.0)
-    # requests include the cut parts, so X_req exceeds what was shipped
-    assert np.all(r.export_requests[1:4, 0] > r.exports[1:4, 0])
+    assert np.all(r.home + r.exports <= r.supply + 1e-9)
+    np.testing.assert_allclose(r.exports[1:4, 0], [500.0, 500.0, 300.0])  # all supply sold
+    assert r.unmet[:, 0].sum() == pytest.approx(2700.0 - 1300.0)
+    # requests include the cut parts, so R_s exceeds what was shipped
+    assert np.all(r.requests[1:4, 0] > r.exports[1:4, 0])
 
 
 def test_world_exports_equal_imports_random_cases() -> None:
@@ -108,7 +109,7 @@ def test_world_exports_equal_imports_random_cases() -> None:
         )
         r = allocate_trade(**a)
         np.testing.assert_allclose(r.imports.sum(axis=0), r.exports.sum(axis=0))
-        assert np.all(r.exports <= r.surplus + 1e-9)
+        assert np.all(r.home + r.exports <= r.supply + 1e-9)
         assert np.all(r.flows >= 0)
         assert np.all(np.diagonal(r.flows, axis1=0, axis2=1) == 0)
         r.ledger.check_conservation()

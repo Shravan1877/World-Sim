@@ -8,6 +8,9 @@ from world.engine.stability import stability_change, unrest_and_leader_fall, upd
 from world.rng import RngBundle
 
 P = load_config().world.stability
+# The §6.11 formula checks use the CLAUDE.md spec values: k_m = 1 and no D49 caps.
+# (The yaml calibrates k_m and caps the shortage terms; see test_d49_caps_and_calibrated_pull.)
+P_SPEC = P.model_copy(update={"k_m": 1.0, "max_food_penalty": 1e9, "max_energy_penalty": 1e9})
 
 
 def _delta(**over) -> float:
@@ -22,7 +25,7 @@ def _delta(**over) -> float:
         shock_effects=np.zeros(1),
         u_n=0.05,
         pi_target=0.02,
-        p=P,
+        p=P_SPEC,
     )
     args.update(over)
     return float(stability_change(**args)[0])
@@ -40,6 +43,15 @@ def test_each_term() -> None:
     assert _delta(welfare_to_gdp=np.array([0.15])) == pytest.approx(5.0)
     assert _delta(stability=np.array([50.0])) == pytest.approx(2.0)
     assert _delta(sanction_cost=np.array([0.5])) == pytest.approx(-0.5)
+
+
+def test_d49_caps_and_calibrated_pull() -> None:
+    """D49: food term at most 10, energy at most 6 points per turn; k_m from yaml (calibrated)."""
+    assert _delta(food_shortage_frac=np.array([0.5]), p=P) == pytest.approx(-P.max_food_penalty)
+    assert _delta(energy_shortage_frac=np.array([0.5]), p=P) == pytest.approx(-P.max_energy_penalty)
+    assert (P.max_food_penalty, P.max_energy_penalty) == (10.0, 6.0)
+    assert _delta(food_shortage_frac=np.array([0.02]), p=P) == pytest.approx(-6.0)  # below the cap
+    assert _delta(stability=np.array([50.0]), p=P) == pytest.approx(P.k_m * 2.0)
 
 
 def test_clip() -> None:

@@ -1,9 +1,9 @@
 """Burn-in (CLAUDE.md §6.15, D38): settle the rough starting state before turn 1.
 
 Run the status-quo policy (nobody acts), no shocks, firm dynamics off, stability held at its
-starting value with no effects (step(..., burn_in=True)) until the economy has settled (D44):
-every country's |GDP change| < settle_tol (1%) for settle_streak (3) turns in a row, with at least
-min_turns (8) and at most max_turns (40) turns. Then:
+starting value with no effects (step(..., burn_in=True)) until the economy has settled (D44, D47):
+the 4-turn average of every country's GDP changes by less than settle_tol (1%) per turn for
+settle_streak (3) checks in a row, with at least min_turns (8) and at most max_turns (40) turns. Then:
   - reset the turn counter to 0 and stability to its configured starting value (§4.3);
   - discard the burn-in history: a fresh ledger that opens at the settled balances, GDP window and
     starting GDP (D32) = the settled GDP, no leader changes, no active shocks.
@@ -29,12 +29,16 @@ from world.rng import RngBundle
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "settled_state.pkl"
 
 
-def settled_streak(history: list[WorldState], tol: float) -> int:
-    """How many of the most recent turns had every country's |GDP change| below tol."""
+def settled_streak(history: list[WorldState], tol: float, window: int = 4) -> int:
+    """How many of the most recent checks had every country's `window`-turn GDP average change by
+    less than tol (D47). A check needs window + 1 turns of history."""
+    gdp = np.array([s.gdp for s in history])
+    if len(gdp) < window + 1:
+        return 0
+    ma = np.array([gdp[k - window + 1 : k + 1].mean(axis=0) for k in range(window - 1, len(gdp))])
     n = 0
-    for prev, cur in zip(reversed(history[:-1]), reversed(history[1:]), strict=True):
-        change = np.abs(cur.gdp / np.maximum(prev.gdp, 1e-12) - 1.0)
-        if np.all(change < tol):
+    for prev, cur in zip(reversed(ma[:-1]), reversed(ma[1:]), strict=True):
+        if np.all(np.abs(cur / np.maximum(prev, 1e-12) - 1.0) < tol):
             n += 1
         else:
             break
@@ -45,7 +49,7 @@ def run_burn_in(cfg: Config, seed: int = 0) -> tuple[WorldState, list[WorldState
     """Returns (settled state, the states after each burn-in turn, for calibration reports).
 
     If the economy has not settled after max_turns, the last state is used; callers can check
-    `settled_streak(history, tol) >= streak` (tests/test_burn_in.py does).
+    `settled_streak(history, tol, window) >= streak` (tests/test_burn_in.py does).
     """
     b = cfg.world.burn_in
     s = initial_state(cfg, seed)
@@ -55,7 +59,7 @@ def run_burn_in(cfg: Config, seed: int = 0) -> tuple[WorldState, list[WorldState
         s, _ = turn_start(s, rng, cfg, shocks_on=b.shocks)
         s, _ = step(s, None, rng, cfg, burn_in=True)
         history.append(s)
-        if t + 1 >= b.min_turns and settled_streak(history, b.settle_tol) >= b.settle_streak:
+        if t + 1 >= b.min_turns and settled_streak(history, b.settle_tol, b.settle_window) >= b.settle_streak:
             break
     return settle(s, cfg), history
 
@@ -64,8 +68,13 @@ def settle(s: WorldState, cfg: Config) -> WorldState:
     """Turn the last burn-in state into the turn-0 starting state."""
     start = initial_state(cfg, s.seed)
     n_hist = s.gdp_hist.shape[1]
+    stock = s.stock.copy()
+    if cfg.world.burn_in.settled_stock_turns is not None:  # D51: stocks = N turns of planned use
+        stock = cfg.world.burn_in.settled_stock_turns * s.demand
+        stock[:, -1] = 0.0  # SERVICES keeps no stock
     return replace(
         s.copy(),
+        stock=stock,
         turn=0,
         stability=start.stability.copy(),
         ledger=Ledger({acc: s.ledger.balance(acc) for acc in all_accounts()}),

@@ -9,7 +9,8 @@ settled state after burn-in (D44, food floor off while searching):
   - roster characters kept: DORNE is the largest net exporter of ENERGY, BRONTIA of GOODS, CERES of
     FOOD, AURELIA of SERVICES, EVERMERE of TECH
   - soft extras that help the flow test: settled prices in [0.6, 1.6], unemployment below 8%.
-Search: a (1+lambda) evolution strategy on log-multipliers with the 1/5 success rule.
+Search: a (1+lambda) evolution strategy on log-multipliers with the 1/5 success rule. Every candidate
+is rounded to 4 decimals before it is evaluated, so the yaml holds exactly the values that were scored.
 Then D43: food_floor_i = 0.7 x settled FOOD demand per person of country i.
 
     uv run python scripts/calibrate_balance.py            # search and print the result
@@ -73,10 +74,22 @@ def project_shares(raw: np.ndarray) -> np.ndarray:
     return s
 
 
+DECIMALS = 4  # D47: the search evaluates exactly the rounded values it writes to yaml
+
+
+def round_shares(shares: np.ndarray) -> np.ndarray:
+    """Round to DECIMALS; put the rounding residual on each row's largest share so rows sum to 1."""
+    sh = np.round(shares, DECIMALS)
+    rows = np.arange(sh.shape[0])
+    sh[rows, sh.argmax(axis=1)] += np.round(1.0 - sh.sum(axis=1), DECIMALS)
+    return np.round(sh, DECIMALS)
+
+
 def decode(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     m = np.exp(np.clip(x, np.log(1 - BAND), np.log(1 + BAND)))
-    A = A_REF * m[:N_A].reshape(A_REF.shape)
-    shares = project_shares(S_REF * m[N_A:].reshape(S_REF.shape))
+    A = np.round(A_REF * m[:N_A].reshape(A_REF.shape), DECIMALS)
+    A = np.clip(A, np.ceil(A_REF * (1 - BAND) * 10**DECIMALS) / 10**DECIMALS, A_REF * (1 + BAND))
+    shares = round_shares(project_shares(S_REF * m[N_A:].reshape(S_REF.shape)))
     return A, shares
 
 
@@ -106,7 +119,7 @@ def measure(cfg: Config) -> dict:
     nx = net_by_good.sum(axis=1) / np.maximum(s.gdp, 1e-9)
     energy_short = s.shortage[:, 1] / np.maximum(s.demand[:, 1], 1e-9)
     return {
-        "settled": settled_streak(hist, b.settle_tol) >= b.settle_streak,
+        "settled": settled_streak(hist, b.settle_tol, b.settle_window) >= b.settle_streak,
         "turns": len(hist) - 1,
         "nx": nx,
         "net_by_good": net_by_good,
@@ -172,9 +185,8 @@ def write_yaml(A: np.ndarray, shares: np.ndarray, floors: np.ndarray) -> None:
     for blk in blocks[1:]:
         name = re.search(r"- name: (\w+)", blk).group(1)  # type: ignore[union-attr]
         i = COUNTRIES.index(name)
-        fmt = lambda v: "{" + ", ".join(f"{g}: {v[k]:.5f}" for k, g in enumerate(SECTORS)) + "}"  # noqa: E731
-        sh = np.round(shares[i], 5)
-        sh[np.argmax(sh)] += round(1.0 - float(sh.sum()), 5)  # exact sum 1 after rounding
+        fmt = lambda v: "{" + ", ".join(f"{g}: {v[k]:.4f}" for k, g in enumerate(SECTORS)) + "}"  # noqa: E731
+        sh = shares[i]  # already rounded by decode() (D47)
         blk = re.sub(r"productivity: \{[^}]*\}", f"productivity: {fmt(A[i])}", blk)
         blk = re.sub(r"\n    consumption_shares: \{[^}]*\}[^\n]*", "", blk)
         blk = re.sub(
@@ -194,11 +206,15 @@ def main() -> None:
     ap.add_argument("--lam", type=int, default=8)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--write", action="store_true")
+    ap.add_argument("--save-x", help="save the best search vector (.npy)")
+    ap.add_argument("--load-x", help="skip the search and use this saved vector (.npy)")
     args = ap.parse_args()
 
     base = load_config()
     print("reference (CLAUDE.md §4.3) objective:", objective(np.zeros(N_A + S_REF.size)))
-    x = search(args.generations, args.lam, args.workers)
+    x = np.load(args.load_x) if args.load_x else search(args.generations, args.lam, args.workers)
+    if args.save_x:
+        np.save(args.save_x, x)
     A, shares = decode(x)
     m = measure(make_cfg(base, A, shares))
     floors = FLOOR_SHARE * m["food_pp"]

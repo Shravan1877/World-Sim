@@ -72,6 +72,7 @@ class Exponents(Strict):
 class ProductionCfg(Strict):
     exponents: dict[Sector, Exponents]
     subsidy_efficiency_default: NonNegative
+    revenue_smoothing: Annotated[float, Field(gt=0, le=1)]  # D46: lambda in R_hat = lam R + (1-lam) R_hat
 
     @field_validator("exponents")
     @classmethod
@@ -95,6 +96,7 @@ class TradeCfg(Strict):
     sigma_trade: Positive
     kappa: NonNegative
     allocation_passes: Annotated[int, Field(ge=1)]
+    home_bias: Positive  # D45: theta, extra weight on the home seller in Armington shares
     export_cap_default: Probability
     sanction_self_cost_default: NonNegative
 
@@ -103,6 +105,7 @@ class PricesCfg(Strict):
     initial_price: Positive
     sigma_p: Positive
     max_change_per_turn: Probability
+    excess_smoothing: Annotated[float, Field(gt=0, le=1)]  # D50: EMA weight on this turn's excess demand
 
 
 class LaborCfg(Strict):
@@ -171,6 +174,8 @@ class StabilityCfg(Strict):
     k_pi: NonNegative
     k_f: NonNegative
     k_e: NonNegative
+    max_food_penalty: NonNegative  # D49: food-shortage term at most this many points per turn
+    max_energy_penalty: NonNegative  # D49: energy-shortage term at most this many points per turn
     k_w: NonNegative
     w_ref: NonNegative
     k_m: NonNegative
@@ -218,12 +223,15 @@ class InitialStateCfg(Strict):
 
 
 class BurnInCfg(Strict):
-    """D44: run until max |GDP change| < settle_tol for settle_streak turns in a row (min..max turns)."""
+    """D44/D47: run until the settle_window-turn average of every country's GDP changes by less than
+    settle_tol per turn for settle_streak checks in a row (min_turns..max_turns)."""
 
     min_turns: Annotated[int, Field(ge=0)]
     max_turns: Annotated[int, Field(ge=1)]
     settle_tol: Positive
     settle_streak: Annotated[int, Field(ge=1)]
+    settle_window: Annotated[int, Field(ge=1)]  # D47: GDP is averaged over this many turns
+    settled_stock_turns: NonNegative | None = None  # D51: reset stocks to this x planned use (None = off)
     policy: Literal["status_quo"]
     shocks: bool
 

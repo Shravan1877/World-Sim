@@ -2,8 +2,8 @@
 
   dStab = - k_u  max(u - u_n, 0) * 100
           - k_pi |pi_annual - pi_t| * 100
-          - k_f  food_shortage_frac * 100
-          - k_e  energy_shortage_frac * 100
+          - min(k_f food_shortage_frac * 100, max_food_penalty)      (D49)
+          - min(k_e energy_shortage_frac * 100, max_energy_penalty)  (D49)
           + k_w  (welfare/GDP - w_ref) * 100
           + k_m  (70 - Stab) / 10
           - sanction self-costs - shock effects
@@ -41,8 +41,8 @@ def stability_change(
     return (
         -p.k_u * np.maximum(u - u_n, 0.0) * 100
         - p.k_pi * np.abs(pi_annual - pi_target) * 100
-        - p.k_f * food_shortage_frac * 100
-        - p.k_e * energy_shortage_frac * 100
+        - np.minimum(p.k_f * food_shortage_frac * 100, p.max_food_penalty)  # D49 cap
+        - np.minimum(p.k_e * energy_shortage_frac * 100, p.max_energy_penalty)
         + p.k_w * (welfare_to_gdp - p.w_ref) * 100
         + p.k_m * (p.normal_level - stability) / p.mean_reversion_scale
         - sanction_cost

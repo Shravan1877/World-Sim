@@ -317,8 +317,9 @@ step:
 
 ### 6.2 Production (Cobb-Douglas with factor demand)
 
-Firms in sector g of country i set factor demand from **last turn's** revenue `R̂[i,g]`
-(plus effective subsidy) and current prices:
+Firms in sector g of country i set factor demand from their **planning revenue** `R̂[i,g]`
+(plus effective subsidy) and current prices. **D46:** `R̂` is smoothed,
+`R̂ = λ·R_last + (1 − λ)·R̂_prev` with `λ = 0.5` (`world.yaml: production.revenue_smoothing`):
 ```
 R̃[i,g]  = R̂[i,g] + η_i · subsidy[i,g]
 L_d[i,g] = (1 − μ[i,g]) · β_g · R̃[i,g] / w_i
@@ -341,7 +342,7 @@ Check: A=2, L=100, E=100, β=0.5, γ=0.3 → Q = 79.6; L=200 → 112.6 (+41%, di
 
 Household spendable money (from last turn, see §6.7–6.8). Households spend their non-saved income
 **plus a slice of their accumulated cash `H_i`** (the savings stock in the ledger):
-`Y_spend_i = Y_disp_i · (1 − s_i) + c_w · H_i`, with `c_w = 0.10` per turn (calibrated to 0.25 in Phase 2 completion, see `docs/calibration.md`).
+`Y_spend_i = Y_disp_i · (1 − s_i) + c_w · H_i`, with `c_w = 0.10` per turn.
 `H_i' = H_i + s_i · Y_disp_i − c_w · H_i` (the saved part goes in, the spent slice goes out).
 **Why this term exists:** without it, savings are a one-way leak, nominal income shrinks every
 turn, and the whole economy slowly dies for no real reason. A toy test (one closed country, 60 turns)
@@ -376,35 +377,37 @@ bills alone ever exceed the budget, the bond market tops household cash back up 
 Welfare is a cash transfer to households (enters next turn's `Y_disp`).
 Subsidies are cash to firms in the targeted sector (enters `R̃`).
 
-### 6.4 Trade (Armington with trust, rationed)
+### 6.4 Trade (Armington with trust and home bias, rationed) — D45
 
-Run for each traded good g ∈ {FOOD, ENERGY, GOODS, TECH, SERVICES} (D40). SERVICES has no stock, so
-`S_dom[i,SERVICES] = Q[i,SERVICES]`.
+One market per good g ∈ {FOOD, ENERGY, GOODS, TECH, SERVICES} (D40). **D45 replaces "imports fill
+gaps":** every buyer spreads its *whole* demand over its home sellers and every eligible foreign
+seller, so productivity and prices decide who supplies whom.
 ```
-S_dom[i,g]  = stock[i,g] + Q[i,g]
-X[j,g]      = max(S_dom[j,g] − D[j,g], 0) · export_cap[j,g]      # exportable surplus
-M[i,g]      = max(D[i,g] − S_dom[i,g], 0)                        # import need
-export_cap  = 1 by default; DORNE ENERGY quota sets it per target; food ban → 0 for that target
+S_dom[s,g]  = stock[s,g] + Q[s,g]                 # SERVICES has no stock: S_dom = Q
+sources for buyer i: home i, and every j ≠ i with no sanction either way and export_cap[i,j] > 0
+c[i,i,g]    = P[i,g]                              # home price, no tariff or levy
+c[i,j,g]    = P[j,g] · (1 + levy[j,g]) · (1 + τ[i,j,g])        # landed price of an import
+score[i,s]  = trust[i,s]^κ · c[i,s,g]^(1 − σ_trade) · (θ if s = i)      trust[i,i] = 1
+share[i,s]  = score / Σ_s score
+request[i,s,g] = share[i,s] · D_remaining[i,g]
 ```
-**Step 1, treaty deliveries:** active `supply_contract` treaties deliver first, at the
-contract price, up to the contracted quantity and the seller's `X`. A shortfall caused by
-the seller's own quota, ban, or sanction is a **violation** (§10).
+`σ_trade = 3` (exponent −2), `κ = 1.0`, home bias `θ = 2.0` (`world.yaml: trade.home_bias`).
+Trust weighting is our addition (§17, D5).
+Check (κ=0, trust equal, no home bias, buyer with no home supply): prices 1.0/1.1/1.3 → shares
+41/34/24%. A 30% tariff on seller 1 → 29/41/29%.
 
-**Step 2, Armington shares** for importer i over eligible exporters j
-(not sanctioned either way, not banned, `X[j,g] > 0`, `j ≠ i`):
-```
-c[i,j,g]   = P[j,g] · (1 + levy[j,g]) · (1 + τ[i,j,g])          # landed price
-score      = trust[i,j]^κ · c[i,j,g]^(1 − σ_trade)
-share[i,j] = score / Σ_j score
-request[i,j,g] = share[i,j] · M_remaining[i,g]
-```
-`σ_trade = 3` (exponent −2), `κ = 1.0`. Trust weighting is our addition (§17, D5).
-Check (κ=0, trust equal): prices 1.0/1.1/1.3 → shares 41/34/24%. A 30% tariff on seller 1
-→ 29/41/29%.
-
-**Step 3, rationing:** if `Σ_i request[i,j,g] > X_remaining[j,g]`, scale those requests
-proportionally. Unmet requests go to a **second pass** of steps 2–3 over exporters with
-remaining surplus. After 2 passes, any still-unmet need is a shortage.
+**Order inside one good:**
+0. **Own-firm reserve:** a seller first keeps its own firms' energy stock-building demand (D30) from
+   its own supply ("an energy exporter keeps what its own firms need").
+1. **Treaty deliveries** (`supply_contract`) go next, at the contract price, up to the contracted
+   quantity, the seller's remaining supply and the export cap. A shortfall caused by the seller's
+   own quota, ban, or sanction is a **violation** (§10).
+2. **Pass 1:** each seller rations ALL requests (home and foreign) proportionally against its
+   remaining supply. Export caps, quotas and bans apply only to the foreign part: buyer i can get at
+   most `export_cap[i,j] · S_dom[j]` from j (`export_cap` = 1 by default; DORNE's quota sets it per
+   target; a food ban sets it to 0). A sanction either way blocks the pair.
+3. **Pass 2:** unmet requests are spread again over sellers with supply left; after two passes the
+   rest is a shortage. Consumption = the quantity bought (§6.3 rules for who buys).
 
 **Payments, all through the ledger:** the importer's buyers (D34, §6.3) pay `c` per unit. Exporter
 firms receive `P[j,g]`. The exporter treasury gets the levy part. The importer treasury
@@ -415,18 +418,18 @@ power), on top of losing that trade.
 
 ### 6.5 Prices and inflation (gradual rule)
 
-After trade, compare demand with availability:
+After trade, each **seller's** price moves with the requests it received against its supply (D45):
 ```
-D_eff[i,g]   = D[i,g] + X_req[i,g]          # own demand + what foreign buyers asked from i (before rationing)
-S_eff[i,g]   = S_dom[i,g] + imports[i,g]    # own supply (stock after inputs + Q) + what i actually received
-P'[i,g] = P[i,g] · (1 + clip(σ_p · (D_eff[i,g] − S_eff[i,g]) / (S_eff[i,g] + ε), −0.20, +0.20))
+R_s[g]  = everything requested from seller s: own-firm reserve + contracts + pass-1 requests
+          (home and foreign buyers, before rationing)
+S_s[g]  = S_dom[s,g]                               # SERVICES: S_dom = Q
+P'[s,g] = P[s,g] · (1 + clip(σ_p · (R_s − S_s) / (S_s + ε), −0.20, +0.20))
 ```
-`X_req[i,g]` = the total quantity importers requested from i over both passes of §6.4 (including
-requests that rationing cut). **Why:** the old rule `S_dom − exports` made an exporter that sold its whole
-surplus look "balanced", so its price never rose. A toy test (A makes 100, home demand 40, B asks 100):
-old rule → exporter price +0%, new rule → +12%. Importers are unchanged (unmet need still pushes
-price up). `D[i,GOODS]` here already includes `D_gov` (§6.3). `σ_p = 0.3`. The ±20% cap per turn is our safety limit. (Calibrated to `σ_p = 0.1` in `world.yaml`; the checks below use 0.3. See `docs/calibration.md`.) SERVICES is traded
-(D40) and has no stock: `S_eff = Q + imports`, `D_eff = D + X_req`, like every other good.
+A sold-out exporter's price rises (its foreign requests count, D28b). `D[i,GOODS]` includes `D_gov`
+(§6.3). `σ_p = 0.3`. The ±20% cap per turn is our safety limit.
+**D50 (available, off):** the rule can use an exponential average of the excess demand
+`x = (R_s − S_s)/(S_s + ε)`, `x̄ = w·x + (1 − w)·x̄_prev`, `P' = P·(1 + clip(σ_p·x̄, −cap, cap))`.
+`w = world.yaml: prices.excess_smoothing`; `w = 1` is the plain rule above (current value, PASS 3).
 Check: P=10, S=100, D=150 → 11.5; D=300 → capped at 12. With fixed supply 100 and spending
 1000, the price converges to 10.
 CPI uses fixed base-period consumption shares: `CPI_i = Σ_g share[i,g]·P[i,g]`;
@@ -544,6 +547,10 @@ All draws use the FIRMS stream (§8).
 Stab' = clip(Stab + ΔStab, 0, 100)
 ```
 Defaults: `k_u=1.0, k_π=0.8, k_f=3.0, k_e=1.5, k_w=1.0, w_ref=0.10, k_m=1.0`.
+**D49:** the food-shortage term is at most 10 points and the energy-shortage term at most 6 points
+per turn (one bad turn must not wipe out stability). **Calibrated (PASS 3):** `k_m = 6.0` in
+`world.yaml`: with `k_m = 1` small permanent penalties (inflation off target, FALKEN's low welfare)
+pull stability toward 20–45; see `docs/calibration.md`.
 Below 30: unrest with probability `(30 − Stab)/60` (SHOCK stream) → output −5% next turn,
 Stab −5. Below 15: the leader falls with probability 0.5 per turn (FALKEN: "coup";
 CERES: probability 0.8, "election loss").
@@ -573,6 +580,7 @@ is shown in briefings.
 1. Money conservation (§6.12).
 2. For each good: Σ exports = Σ imports (world).
 3. Stock-flow (`stock` = start-of-turn stock): `stock' = stock + Q + imports − exports − consumption − energy_inputs − spoilage`
+   (D45: home purchases move goods from a country's sellers to its own buyers, so they cancel here)
    (energy_inputs counted once only, see §6.2; military GOODS purchases count as consumption)
    (spoilage δ: FOOD 0.20, ENERGY 0.05, GOODS 0.03, TECH 0.05, SERVICES 1.0 per turn; SERVICES stock is always 0, D40).
 4. No negative stocks, prices, wages, labor, treasury (debt absorbs negatives). Firm accounts end
@@ -585,9 +593,11 @@ keep the checkpoint, never "continue anyway".
 ### 6.15 Burn-in and calibration
 
 Before turn 1, run the `status_quo` bot for every country with no shocks, starting from prices
-1.0 and rough stocks/wages, **until settled (D44):** every country's |GDP change| < 1% per turn for 3
-turns in a row, at least 8 and at most 40 turns (`world.yaml: burn_in`). Initial ENERGY stock = 1.5 ×
-planned firm energy input. Discard the burn-in history and
+1.0 and rough stocks/wages, **until settled (D44, D47):** the 4-turn average of every country's GDP changes by less than 1% per
+turn for 3 checks in a row, at least 8 and at most 40 turns (`world.yaml: burn_in`). Initial ENERGY stock = 1.5 ×
+planned firm energy input. **D51 (available, off):** after burn-in all stocks can be reset to N turns
+of planned use (`world.yaml: burn_in.settled_stock_turns`; 3 tried in PASS 2, now `null`). Discard the
+burn-in history and
 start the game from the settled state.
 **D38:** during burn-in stability is held at its starting value and has no effects (no unrest, leader
 fall or default stability hit), and firm dynamics (breakup, entry, exit) are off, so the burn-in
@@ -1182,6 +1192,13 @@ Video rule: record replays of finished runs. Never run live.
 | D42 | No savings-interest payment from the bond market; households' interest income is the D37 sweep; the rate acts through the saving rate only; `interest_on_savings` removed from `Y_disp` (§6.7, §6.8) | Locked (owner decision 2026-10-06) |
 | D43 | Food floor per country: `f_min_i` = 0.7 × settled FOOD demand per person of country i, stored per country in yaml; must not bind at the settled state and must bind in a harvest-failure test. Replaces D36 (§4.3, §6.3) | Locked (owner decision 2026-10-06) |
 | D44 | Burn-in runs until settled: max GDP change < 1%/turn for 3 turns in a row, min 8, max 40 turns; initial ENERGY stock = 1.5 × planned firm energy input; stability held at configured starts during burn-in; fixture re-saved (§6.15) | Locked (owner decision 2026-10-06) |
+| D45 | Armington with home bias replaces "imports fill gaps": every buyer spreads its whole demand over home and eligible foreign sellers (`θ = 2.0` on home, trust[i,i] = 1, c[i,i] = P[i]); contracts first; each seller rations all requests proportionally against `S_dom`; caps/quotas/bans/sanctions limit only the foreign part (at most `export_cap · S_dom[j]`); second pass, then shortage; consumption = quantity bought. Price rule on `R_s` (requests received, first pass) vs `S_s = S_dom`. Assistant detail: a seller keeps its own firms' D30 energy reserve before rationing (keeps "exporter keeps what its own firms need") (§6.4, §6.5, §6.14) | Locked (owner decision 2026-10-07) |
+| D46 | Planning revenue smoothed: `R̂ = λ·R_last + (1 − λ)·R̂_prev`, `λ = 0.5` in yaml (§6.2) | Locked (owner decision 2026-10-07) |
+| D47 | Burn-in settled when the 4-turn GDP average changes < 1%/turn for 3 checks in a row (min 8, max 40). `scripts/calibrate_balance.py` evaluates exactly the 4-decimal values it writes. Flow-test price band = 0.5–2.0 × settled prices; settled price table in `docs/calibration.md` (§6.15) | Locked (owner decision 2026-10-07) |
+| D48 | Known limitation, not fixed: government borrowing creates money (bond market issues it, D37 sweeps it to households). Test: world money supply (household cash + treasuries) grows < 1% per turn in status-quo runs; noted in `docs/open_issues.md` | Locked (owner decision 2026-10-07) |
+| D49 | Shortage penalties capped: food term ≤ 10, energy term ≤ 6 stability points per turn (§6.11) | Locked (owner decision 2026-10-07, PASS 2) |
+| D50 | Price rule may use an exponential average of excess demand (weight in yaml). Tried at 0.5 in PASS 2 (burn-in stopped settling, prices fell to 0.29× settled); PASS 3 sets the weight to 1.0 = off (§6.5) | Locked mechanism; **off** after PASS 3 tuning |
+| D51 | After burn-in, stocks may be reset to N turns of planned use (yaml). Tried at 3 in PASS 2 (prices crashed, unemployment 26%); PASS 3 sets it to null = off (§6.15) | Locked mechanism; **off** after PASS 3 tuning |
 
 ---
 

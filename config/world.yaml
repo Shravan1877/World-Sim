@@ -29,6 +29,7 @@ production:
     TECH:     {beta: 0.60, gamma: 0.20}
     SERVICES: {beta: 0.70, gamma: 0.10}
   subsidy_efficiency_default: 0.5      # eta; BRONTIA overrides to 1.0 in countries.yaml
+  revenue_smoothing: 0.5               # D46: R_hat = 0.5 x last revenue + 0.5 x previous R_hat
 
 # --- §4.3 / §6.3: household demand ---------------------------------------
 demand:
@@ -38,21 +39,23 @@ demand:
     GOODS: 0.25
     TECH: 0.12
     SERVICES: 0.28
-  wealth_spend_rate: 0.25              # c_w: share of household cash H spent each turn (calibrated, was 0.10; docs/calibration.md)
+  wealth_spend_rate: 0.10              # c_w: share of household cash H spent each turn
 
 # --- §6.4: trade ----------------------------------------------------------
 trade:
   sigma_trade: 3.0                     # Armington elasticity; cost exponent = 1 - sigma = -2
   kappa: 1.0                           # trust weight exponent (D5)
   allocation_passes: 2                 # unmet requests get a second pass, then shortage
+  home_bias: 2.0                       # D45: theta, buyers' extra weight on home sellers
   export_cap_default: 1.0
   sanction_self_cost_default: 0.5      # stability lost per active sanction per turn (AURELIA overrides)
 
 # --- §6.5: prices and inflation ------------------------------------------
 prices:
   initial_price: 1.0                   # every (country, good) at the start of burn-in
-  sigma_p: 0.1                         # calibrated, spec 0.3 (docs/calibration.md)
+  sigma_p: 0.3
   max_change_per_turn: 0.20            # +/- cap on the price change per turn
+  excess_smoothing: 1.0                # D50: EMA weight on excess demand; 0.5 tried in PASS 2, 1.0 = off (docs/calibration.md)
   # CPI uses the fixed base-period consumption shares (demand.consumption_shares_*).
 
 # --- §6.5 / §6.14: stocks -------------------------------------------------
@@ -125,9 +128,11 @@ stability:
   k_pi: 0.8
   k_f: 3.0
   k_e: 1.5
+  max_food_penalty: 10.0               # D49: food-shortage term at most 10 points per turn
+  max_energy_penalty: 6.0              # D49: energy-shortage term at most 6 points per turn
   k_w: 1.0
   w_ref: 0.10
-  k_m: 1.0
+  k_m: 6.0                             # calibrated, spec 1.0 (PASS 3, docs/calibration.md)
   normal_level: 70                     # slow pull back to this level
   mean_reversion_scale: 10             # k_m * (70 - Stab) / 10
   min: 0
@@ -175,7 +180,9 @@ burn_in:                               # D44: run until settled
   min_turns: 8
   max_turns: 40
   settle_tol: 0.01                     # max |GDP change| per turn, every country
-  settle_streak: 3                     # turns in a row below settle_tol
+  settle_streak: 3                     # checks in a row below settle_tol
+  settle_window: 4                     # D47: compare 4-turn GDP averages
+  settled_stock_turns: null            # D51: 3.0 tried in PASS 2 (prices crashed); null = off (docs/calibration.md)
   policy: status_quo
   shocks: false
 

@@ -53,7 +53,6 @@ CALLS = {
     "household_demand": (demand.household_demand, (SH, V6, P65, 0.15, V6), {}),
     "government_goods_demand": (demand.government_goods_demand, (V6, P65[:, 2]), {}),
     "total_demand": (demand.total_demand, (Q65, V6), {}),
-    "market_balance": (prices.market_balance, (Q65, P65 * 50, Q65, X64, X64), {}),
     "price_change_rate": (prices.price_change_rate, (Q65, P65 * 50, 0.3, 0.2, 1e-9), {}),
     "update_prices": (prices.update_prices, (P65, Q65, P65 * 50, 0.3, 0.2, 1e-9), {}),
     "cpi": (prices.cpi, (SH, P65), {}),

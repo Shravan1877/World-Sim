@@ -265,3 +265,98 @@ does not settle in 40 turns; (4) energy starvation test fails for the same reaso
 | 58 | 1.12 / 1.23 / 1.11 / 1.03 / 0.95 / 1.05 | 0.33–2.47 | 0.00 / 0.00 / 0.03 / 0.00 / 0.00 / 0.00 | 20 / 53 / 55 / 25 / 0 / 21 | -0.00 | 2.20 / 2.52 / 1.56 / 2.42 / 0.68 / 1.12 | -0.2 / -1.5 / 2.4 / -1.3 / -4.3 / 7.8 |
 | 59 | 1.12 / 1.21 / 1.15 / 1.03 / 1.00 / 1.11 | 0.33–2.47 | 0.00 / 0.01 / 0.00 / 0.00 / 0.03 / 0.01 | 19 / 53 / 58 / 25 / 0 / 13 | 0.00 | 2.20 / 2.50 / 1.53 / 2.43 / 0.68 / 1.06 | -1.3 / -1.3 / -1.1 / 0.2 / -0.8 / 8.3 |
 | 60 | 1.12 / 1.20 / 1.15 / 1.03 / 0.96 / 1.04 | 0.33–2.48 | 0.00 / 0.00 / 0.00 / 0.00 / 0.00 / 0.00 | 24 / 54 / 60 / 25 / 5 / 14 | 0.00 | 2.21 / 2.46 / 1.57 / 2.42 / 0.71 / 1.09 | -1.5 / -1.7 / 1.1 / 1.6 / -4.7 / 6.5 |
+
+---
+
+## Pass 3 (D45–D51, 2026-10-07): final values — the flow CHECK passes
+
+### What was run
+1. **PASS 1 (D45–D48):** Armington with home bias θ = 2, smoothed planning revenue (λ = 0.5),
+   settle rule on 4-turn GDP averages, money-supply test. D41 search re-run under the new trade rule
+   (150 generations; every candidate evaluated at its 4-decimal rounded values, D47). Then σ_p = 0.3
+   and c_w = 0.10 were tried: with the new trade rule they did as well as the calibrated values, so
+   **both went back to the spec**. CHECK result: everything passed except stability (minimum 0).
+2. **PASS 2 (D49–D51):** shortage-penalty caps 10/6, price EMA weight 0.5, stocks reset to 3 turns of
+   planned use. Worse: burn-in stopped settling, prices fell to 0.29× settled, unemployment 25.8%,
+   stability still 0. Diagnosis: stability was not falling from shortages but from small permanent
+   penalties (inflation a little off target costs 1–4 points a turn, FALKEN's welfare share 0.08
+   below w_ref 0.10 costs 2) against a weak pull back to 70 (k_m = 1 → resting level 20–45).
+3. **PASS 3 (yaml only):** D51 off (null), D50 off (weight 1.0), D49 caps kept, and k_m raised. 20-seed
+   CHECK, minimum stability: k_m 4 → 29.4; 5 → 35.5; 4 + w_ref 0.08 → 34.4; 5 + w_ref 0.08 → 39.5;
+   **6 → 40.1 (passes)**. k_m = 6 is the single smallest change that passes.
+
+### Every parameter that now differs from CLAUDE.md (before → after)
+
+| Parameter | CLAUDE.md | yaml now | Why kept |
+|---|---|---|---|
+| `stability.k_m` | 1.0 | **6.0** | With 1–5 the 20-seed stability minimum stays below 40 (29–40) |
+| A table, consumption shares | §4.3 | D41 values below | Balanced-benchmark calibration (owner decision D41) |
+| `food_floor` per country | `f_min = 0.15` (world) | D43 values below | Owner decision D43 |
+| σ_p, price cap, wage cap, c_w | 0.3, 0.20, 0.10, 0.10 | **same as spec** | Restored in PASS 1 |
+
+New yaml parameters from decisions (no spec value existed): `trade.home_bias` 2.0 (D45),
+`production.revenue_smoothing` 0.5 (D46), `burn_in.settle_window` 4 (D47), `stability.max_food_penalty`
+10 and `max_energy_penalty` 6 (D49), `prices.excess_smoothing` 1.0 = off (D50),
+`burn_in.settled_stock_turns` null = off (D51), plus the D32/D37/D44 values listed in pass 1/2.
+
+### Final CHECK (after burn-in, 60 turns, no shocks, status quo, 20 seeds)
+
+| Band | Required | Reached |
+|---|---|---|
+| GDP ÷ start | 0.5–2.0 | 0.750–1.017 |
+| prices ÷ settled | 0.5–2.0 | 0.579–1.425 |
+| unemployment | < 0.25 | max 0.153 |
+| stability | 40–90 | 40.3–73.0 |
+| money supply growth | < 1%/turn | max 0.00% |
+| bond market, treasuries | bounded (≤ 2 × start GDP) | 0.000, 0.136 |
+
+#### Productivity A, CLAUDE.md §4.3 → yaml (D41, each within ±30%)
+
+| Country | FOOD | ENERGY | GOODS | TECH | SERVICES |
+|---|---|---|---|---|---|
+| DORNE | 0.60 → 0.7800 | 2.50 → 3.2500 | 0.60 → 0.7800 | 0.40 → 0.5200 | 0.80 → 1.0400 |
+| BRONTIA | 0.90 → 1.1700 | 0.40 → 0.2800 | 2.00 → 1.4000 | 0.90 → 0.7040 | 0.90 → 0.6604 |
+| CERES | 2.20 → 1.5400 | 0.50 → 0.6500 | 0.60 → 0.5080 | 0.40 → 0.5200 | 0.80 → 0.7527 |
+| FALKEN | 1.00 → 0.7667 | 0.90 → 1.1700 | 1.10 → 1.4300 | 0.60 → 0.7800 | 0.70 → 0.6090 |
+| AURELIA | 0.50 → 0.3500 | 0.30 → 0.2506 | 0.90 → 1.0143 | 1.30 → 0.9100 | 2.20 → 1.9142 |
+| EVERMERE | 0.50 → 0.3500 | 0.50 → 0.3584 | 1.00 → 0.7000 | 2.40 → 1.6800 | 1.40 → 1.8200 |
+
+#### Consumption shares, §4.3 → yaml (D41), and D43 food floors
+
+| Country | FOOD | ENERGY | GOODS | TECH | SERVICES | food_floor |
+|---|---|---|---|---|---|---|
+| DORNE | 0.22 → 0.1551 | 0.13 → 0.1690 | 0.25 → 0.1763 | 0.12 → 0.1435 | 0.28 → 0.3561 | 0.02432 |
+| BRONTIA | 0.22 → 0.2693 | 0.13 → 0.1223 | 0.25 → 0.1750 | 0.12 → 0.1469 | 0.28 → 0.2865 | 0.01810 |
+| CERES | 0.22 → 0.1540 | 0.13 → 0.0910 | 0.25 → 0.2904 | 0.12 → 0.1394 | 0.28 → 0.3252 | 0.02243 |
+| FALKEN | 0.22 → 0.2669 | 0.13 → 0.1042 | 0.25 → 0.1750 | 0.12 → 0.1182 | 0.28 → 0.3357 | 0.01792 |
+| AURELIA | 0.21 → 0.1717 | 0.12 → 0.0937 | 0.20 → 0.1721 | 0.11 → 0.1342 | 0.36 → 0.4283 | 0.00903 |
+| EVERMERE | 0.22 → 0.2588 | 0.13 → 0.1529 | 0.25 → 0.1750 | 0.12 → 0.0840 | 0.28 → 0.3293 | 0.01361 |
+
+#### Settled prices after burn-in (D47: the flow test's price band is 0.5–2.0 × these)
+
+| Country | FOOD | ENERGY | GOODS | TECH | SERVICES | GDP |
+|---|---|---|---|---|---|---|
+| DORNE | 0.621 | 0.481 | 0.771 | 0.832 | 0.387 | 15.93 |
+| BRONTIA | 0.332 | 1.000 | 0.433 | 0.475 | 0.358 | 12.03 |
+| CERES | 0.332 | 1.215 | 1.224 | 0.772 | 0.411 | 11.38 |
+| FALKEN | 0.546 | 0.691 | 0.454 | 0.502 | 0.452 | 12.99 |
+| AURELIA | 1.406 | 1.000 | 0.794 | 0.617 | 0.263 | 8.81 |
+| EVERMERE | 1.304 | 1.000 | 1.012 | 0.441 | 0.246 | 9.39 |
+
+#### Settled state vs the D41 objective
+
+| Country | net exports % GDP | energy shortage | unemployment |
+|---|---|---|---|
+| DORNE | -15.8% | -0.0% | 0.4% |
+| BRONTIA | +8.4% | 0.0% | 0.0% |
+| CERES | +6.8% | 0.0% | 0.0% |
+| FALKEN | +4.3% | 0.0% | 0.2% |
+| AURELIA | -1.9% | 0.0% | 0.0% |
+| EVERMERE | +3.6% | -0.0% | 0.0% |
+
+Burn-in settled after 29 turns.
+
+**D41 objective not fully met:** the burn-in settles and there is no energy shortage, but net exports
+are outside ±3% of GDP for DORNE (−15.8%), BRONTIA (+8.4%), CERES (+6.8%), FALKEN (+4.3%) and
+EVERMERE (+3.6%), and AURELIA is not the largest SERVICES exporter. The flow CHECK passes anyway;
+see `docs/open_issues.md`.

@@ -1,4 +1,4 @@
-"""Prices (§6.5, D28b): gradual rule, cap, convergence, exporter/importer cases, CPI, inflation."""
+"""Prices (§6.5, D28b, D45): gradual rule, cap, convergence, seller cases, CPI, inflation."""
 
 import numpy as np
 import pytest
@@ -7,10 +7,11 @@ from world.engine.prices import (
     annualize,
     cpi,
     inflation_quarterly,
-    market_balance,
     price_change_rate,
     update_prices,
 )
+from world.engine.trade import allocate_trade
+from world.ledger import Ledger, households
 
 SIG, CAP, EPS = 0.3, 0.2, 1e-9
 
@@ -38,51 +39,56 @@ def test_converges_to_spending_over_supply() -> None:
     assert pytest.approx(10.0, abs=1e-4) == P
 
 
-def _one_country(demand_food: float, s_dom_food: float, x_req: float, imports: float):
-    D = np.zeros((1, 5))
-    S = np.zeros((1, 5))
-    D[0, 0], S[0, 0] = demand_food, s_dom_food
-    X = np.zeros((1, 4))
-    M = np.zeros((1, 4))
-    X[0, 0], M[0, 0] = x_req, imports
-    return market_balance(D, S, np.zeros((1, 5)), X, M)
+def _market(stock: np.ndarray, demand: np.ndarray, home_bias: float = 1.0):
+    """D45 market for one good among 2 countries (FOOD column only)."""
+    n = stock.shape[0]
+    return allocate_trade(
+        stock=stock[:, None],
+        output=np.zeros((n, 1)),
+        demand=demand[:, None],
+        price=np.ones((n, 1)),
+        levy=np.zeros((n, 1)),
+        tariff=np.zeros((n, n, 1)),
+        export_cap=np.ones((n, n, 1)),
+        sanction=np.zeros((n, n), dtype=bool),
+        trust=np.full((n, n), 0.7),
+        kappa=0.0,
+        sigma=3.0,
+        passes=2,
+        contracts=(),
+        ledger=Ledger.with_opening({households(i): 1e6 for i in range(n)}),
+        home_bias=home_bias,
+    )
 
 
 def test_exporter_price_rises_when_sold_out() -> None:
-    # Makes 100, home demand 40, foreign buyers ask for 100 -> excess (140-100)/100 = 0.40 -> +12%
-    d_eff, s_eff = _one_country(40, 100, 100, 0)
-    assert d_eff[0, 0] == 140 and s_eff[0, 0] == 100
-    assert price_change_rate(d_eff, s_eff, SIG, CAP, EPS)[0, 0] == pytest.approx(0.12)
+    # Country 0 has 100, home demand 40; country 1 has nothing and asks for 100.
+    # D45: R_0 = 40 + 100 = 140 requests against S = 100 -> (140-100)/100 * 0.3 = +12%.
+    r = _market(np.array([100.0, 0.0]), np.array([40.0, 100.0]))
+    assert r.requests[0, 0] == pytest.approx(140.0) and r.supply[0, 0] == 100.0
+    assert price_change_rate(r.requests, r.supply, SIG, CAP, EPS)[0, 0] == pytest.approx(0.12)
     # The old rule (S = S_dom - exports, exports = the 60 surplus) saw a "balanced" market: 0%.
     old_rate = price_change_rate(np.array([40.0]), np.array([100.0 - 60.0]), SIG, CAP, EPS)[0]
     assert old_rate == pytest.approx(0.0)
 
 
-def test_importer_price_rises_on_unmet_need() -> None:
-    # Need 100, no own supply, receives 60 -> (100-60)/60 * 0.3 = 0.2 -> +20% (at the cap)
-    d_eff, s_eff = _one_country(100, 0, 0, 60)
-    assert price_change_rate(d_eff, s_eff, SIG, CAP, EPS)[0, 0] == pytest.approx(0.20)
+def test_seller_rations_home_and_foreign_buyers_alike() -> None:
+    """D45: requests 140 against supply 100 -> everyone gets 100/140 of what they asked."""
+    r = _market(np.array([100.0, 0.0]), np.array([40.0, 100.0]))
+    assert r.home[0, 0] == pytest.approx(40.0 * 100 / 140)
+    assert r.imports[1, 0] == pytest.approx(100.0 * 100 / 140)
+    assert r.unmet[:, 0].sum() == pytest.approx(40.0)
 
 
-def test_market_balance_without_trade_and_services_rule() -> None:
-    D = np.arange(1, 11, dtype=float).reshape(2, 5)
-    S = np.full((2, 5), 7.0)
-    Q = np.full((2, 5), 3.0)
-    S[:, 4] = Q[:, 4]  # SERVICES has no stock: S_dom = Q (D40)
-    zeros = np.zeros((2, 5))
-    d_eff, s_eff = market_balance(D, S, Q, zeros, zeros)
-    np.testing.assert_array_equal(d_eff, D)
-    np.testing.assert_array_equal(s_eff, S)
+def test_home_bias_shifts_requests_home() -> None:
+    """Equal prices and trust (kappa = 0): theta = 2 -> home gets 2/3 of a 2-seller choice."""
+    r = _market(np.array([1000.0, 1000.0]), np.array([90.0, 0.0]), home_bias=2.0)
+    assert r.home[0, 0] == pytest.approx(60.0)
+    assert r.imports[0, 0] == pytest.approx(30.0)
 
 
-def test_services_traded_like_other_goods() -> None:
-    """D40: SERVICES S_eff = Q + imports, D_eff = D + export requests."""
-    D = np.full((1, 5), 10.0)
-    Q = np.full((1, 5), 8.0)
-    req, imp = np.zeros((1, 5)), np.zeros((1, 5))
-    req[0, 4], imp[0, 4] = 3.0, 1.5
-    d_eff, s_eff = market_balance(D, Q.copy(), Q, req, imp)
-    assert d_eff[0, 4] == 13.0 and s_eff[0, 4] == 9.5
+def test_seller_without_supply_or_requests_keeps_its_price() -> None:
+    assert price_change_rate(np.zeros((1, 1)), np.zeros((1, 1)), SIG, CAP, EPS)[0, 0] == 0.0
 
 
 def test_cpi_and_inflation() -> None:
