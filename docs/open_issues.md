@@ -16,6 +16,36 @@ keeps them in the repo.
 
 After these changes every §6.14 invariant holds: 14 turns × 20 seeds, with and without shocks.
 
+## Status after D45–D51 (2026-10-07): the flow CHECK passes
+
+All Phase 2 / Phase 3 checks pass with no xfail (20 seeds): GDP 0.75–1.02 × start, prices
+0.58–1.43 × settled, unemployment ≤ 15.3%, stability 40.3–73.0, money growth 0%, bond market and
+treasuries bounded, the burn-in settles (29 turns), test_energy, the food-floor tests, and the
+14-turn × 20-seed shock run. Numbers and every parameter change: `docs/calibration.md`, pass 3.
+
+Still open (none of these fail a test):
+- **S1, thin stability margin:** the minimum is 40.3 against a floor of 40, with k_m = 6 (spec 1).
+  The real cause is the stability formula: |π − 2%| costs points every turn even near target, and
+  FALKEN's welfare share sits below w_ref permanently. Next: a dead band on the inflation term, or a
+  per-country w_ref equal to the starting welfare share; either would let k_m go back toward 1.
+- **S2, D41 trade balance not met:** settled net exports are −15.8% of GDP (DORNE) to +8.4%
+  (BRONTIA), and AURELIA is not the largest SERVICES exporter. Next: weight the net-export term
+  more in `scripts/calibrate_balance.py`, or allow θ (home bias) to vary by good.
+- **S3, D50 and D51 are built but off:** turning them on (PASS 2) made the burn-in stop settling.
+- **S4, burn-in sensitivity:** before D45 the settled state depended chaotically on tiny parameter
+  changes. With D45 and D47 the search now evaluates exactly what it writes, and the result is
+  reproducible, but it was not re-tested for robustness to small A changes.
+
+## Known limitation (D48, not fixed): government borrowing creates money
+
+When a treasury runs out of cash, the government borrows from the `bond_market` account, which may
+go negative: it is the money issuer, so each borrowed credit is new money. Interest the governments
+pay later goes back to the bond market and the D37 sweep pays any surplus to households. So a
+government that keeps running deficits keeps adding money to the economy. Under status-quo play this
+stays small; `tests/test_money_supply.py` checks that world money (household cash + treasuries) grows
+by less than 1% per turn. Agents who run large deficits on purpose could make it grow faster; the
+experiments should report money growth per run.
+
 ## Update after D40–D44 and calibration pass 2 (2026-10-06)
 
 Fixed: money loop (bond market ≈ 0, treasuries bounded), unemployment (≤ 8%), GDP stays in the band

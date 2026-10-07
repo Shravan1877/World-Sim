@@ -23,11 +23,11 @@ uv run ruff check
 - **Phase 1 (engine core): done.** Seeded RNG streams (`world/rng.py`), double-entry ledger
   (`world/ledger.py`), vectorized world state + initial state + state hash
   (`world/engine/state.py`), production, demand and prices (`world/engine/`).
-- **Phase 2 (full economy step): code complete, NOT done.** Trade (all 5 goods, D40), labor,
-  fiscal, monetary, stability, income step, money loop, burn-in until settled (D44), per-country food
-  floor (D43), balanced-benchmark calibration script (`scripts/calibrate_balance.py`, D41). Every §6.14
-  invariant holds. GDP, unemployment, bond market and treasuries are now in the owner's bands.
-  **Blocked:** prices leave [0.5, 2.0], stability sinks below 40 from recurring shortages, and the
-  burn-in does not settle in 40 turns. See `docs/calibration.md` (pass 2) and `docs/open_issues.md`.
-- **Phase 3 (firms, shocks, trust): built.** The 14-turn × 20-seed invariant test with shocks and
-  the energy_crunch scenario passes (from the settled state). It waits on the Phase 2 blocker above.
+- **Phase 2 (full economy step): done.** Trade as one Armington market per good with home bias (D45),
+  labor, fiscal, monetary, stability, the income step, the money loop (D37), a burn-in that runs until
+  settled (D44/D47), per-country food floors (D43) and the balanced-benchmark calibration script
+  (`scripts/calibrate_balance.py`, D41). Every §6.14 invariant holds, and the 60-turn × 20-seed flow
+  check passes (`tests/test_flow.py`). Parameters that differ from the spec and open points:
+  `docs/calibration.md` (pass 3) and `docs/open_issues.md`.
+- **Phase 3 (firms, shocks, trust): done.** The 14-turn × 20-seed run with shocks and the
+  energy_crunch scenario passes from the settled state.
