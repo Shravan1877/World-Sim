@@ -13,6 +13,8 @@ from enum import IntEnum
 
 import numpy as np
 
+Generator = np.random.Generator  # the type of every generator; import it from here, not numpy
+
 
 class Stream(IntEnum):
     """Named random streams (§8). The numbers are part of the experiment design; never change them."""

@@ -286,12 +286,19 @@ class TreatiesCfg(Strict):
     duration: tuple[int, int]
     proposal_expiry_turns: Annotated[int, Field(ge=1)]
     loan_max_treasury_share: Probability
+    loan_rate: tuple[float, float]  # annual interest rate range in loan treaties
     kinds: list[Literal["supply_contract", "tariff_cap", "no_sanction_pact", "loan"]]
 
     @field_validator("duration")
     @classmethod
     def _dur(cls, v: tuple[int, int]) -> tuple[int, int]:
         _check_range(v, "treaties.duration")
+        return v
+
+    @field_validator("loan_rate")
+    @classmethod
+    def _rate(cls, v: tuple[float, float]) -> tuple[float, float]:
+        _check_range(v, "treaties.loan_rate")
         return v
 
 

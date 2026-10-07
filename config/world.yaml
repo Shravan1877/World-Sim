@@ -215,6 +215,7 @@ treaties:
   duration: [1, 8]
   proposal_expiry_turns: 1
   loan_max_treasury_share: 0.10        # non-AURELIA lenders: at most 10% of treasury
+  loan_rate: [0.0, 0.30]               # annual rate in loan terms (our choice; §10 gives no range)
   kinds: [supply_contract, tariff_cap, no_sanction_pact, loan]
 
 # --- §11: agent layer -----------------------------------------------------

@@ -43,7 +43,15 @@ class Treaty:
     duration: int
     proposed_turn: int
     status: str = "proposed"  # proposed | active | rejected | expired | suspended | ended
-    start_turn: int = -1
+    start_turn: int = -1  # turn it was accepted (becomes active)
+    end_turn: int = -1  # turn it stopped being active or open (any final status)
+    note: str = ""  # why it ended: "completed", "renounced", "violated by X", ...
+
+    def term(self, key: str) -> float | int | str:
+        return dict(self.terms)[key]
+
+    def parties(self) -> tuple[int, int]:
+        return self.proposer, self.addressee
 
 
 @dataclass(frozen=True)
@@ -84,6 +92,7 @@ class WorldState:
     labor: np.ndarray  # L used last turn
     energy_in: np.ndarray  # E used last turn
     subsidy: np.ndarray  # credits of subsidy per sector this turn (enters R-tilde)
+    industry_subsidy: np.ndarray  # BRONTIA's subsidize_industry: extra targeted subsidy, share of GDP
     markup: np.ndarray  # mu
     n_firms: np.ndarray  # int
     nationalized: np.ndarray  # bool
@@ -103,6 +112,7 @@ class WorldState:
     military_share: np.ndarray
     subsidy_share: np.ndarray
     subsidy_target: np.ndarray  # int sector index, -1 = not set
+    gov_revenue: np.ndarray  # last turn's government revenue: taxes, tariffs, levies, state profits
     debt: np.ndarray
     gdp: np.ndarray  # quarterly nominal value added, last turn
     gdp_prev: np.ndarray
@@ -335,6 +345,7 @@ def initial_state(cfg: Config, seed: int) -> WorldState:
         labor=L0,
         energy_in=E0,
         subsidy=zeros65.copy(),
+        industry_subsidy=zeros65.copy(),
         markup=mu0,
         n_firms=n_firms,
         nationalized=np.zeros((N_COUNTRIES, N_SECTORS), dtype=bool),
@@ -353,6 +364,7 @@ def initial_state(cfg: Config, seed: int) -> WorldState:
         military_share=military_share,
         subsidy_share=subsidy_share,
         subsidy_target=np.full(N_COUNTRIES, -1, dtype=np.int64),
+        gov_revenue=tax * gdp,
         debt=debt,
         gdp=gdp,
         gdp_prev=gdp.copy(),

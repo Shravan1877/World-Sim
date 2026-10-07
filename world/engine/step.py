@@ -1,10 +1,10 @@
 """turn_start() and step(): the functions that advance the world by one quarter (CLAUDE.md §6.1).
 
     turn_start: turn += 1, roll + apply shocks (§7), scripted incidents, move order (§4.2)
-    [agents move; accepted actions change POLICY fields of the state (policy.py, a later phase)]
+    [agents move; accepted actions change POLICY fields of the state (policy.py)]
     step:       1 production   2 demand   3 trade   4 consumption   5 stocks   6 prices
                 7 income/ledger (profits)  8 labor  9 fiscal  10 monetary  11 firms  12 military
-                13 stability (unrest, leader change)  14 trust  15 treaties (later phase)
+                13 stability (unrest, leader change)  14 trust  15 treaties (treaties.py)
                 16 snapshot: age shocks, invariant checks (§6.14)
 
 Both functions are pure: they copy the state and return a new one. All money moves through the
@@ -34,12 +34,13 @@ from world.engine import demand as demand_mod
 from world.engine import firms as firms_mod
 from world.engine import fiscal, income, invariants, labor, military, monetary, prices, production, shocks
 from world.engine import stability as stab_mod
+from world.engine import treaties as treaties_mod
 from world.engine import trust as trust_mod
 from world.engine.params import country_params
 from world.engine.recycle import recycle
 from world.engine.state import ENERGY, FOOD, GOODS, N_TRADED, ActiveShock, Event, WorldState
-from world.engine.trade import ContractDelivery, SupplyContract, allocate_trade
-from world.ledger import BOND_MARKET, LedgerError, government, households
+from world.engine.trade import ContractDelivery, allocate_trade
+from world.ledger import BOND_MARKET, Ledger, LedgerError, government, households
 from world.ledger import firms as firm_account
 from world.order import move_order
 from world.rng import RngBundle
@@ -77,6 +78,7 @@ def turn_start(
         s, ev = shocks.apply_scenario(s, scenario, cfg)
         events += ev
     shocks.recompute_multipliers(s)
+    s.treaties = treaties_mod.expire_proposals(s.treaties, s.turn, cfg.world.treaties.proposal_expiry_turns)
     return s, TurnStart(s.turn, tuple(events), move_order(rng, s.turn))
 
 
@@ -87,15 +89,13 @@ def turn_start(
 class TurnInputs:
     """What step() needs from this turn's accepted actions beyond the policy fields already set.
 
-    Built by the policy/treaty layers (later phases). Defaults = a quiet turn.
+    Built from the accepted actions by policy.py (PolicyEffects.turn_inputs). Defaults = a quiet
+    turn. Treaty execution and violations are NOT inputs: step reads them from state.treaties.
     """
 
     antitrust: np.ndarray | None = None  # (6, 5) int: antitrust actions this turn per (country, sector)
     sanctions_imposed: tuple[tuple[int, int], ...] = ()  # (sanctioner, target), new this turn
-    violations: tuple[tuple[int, int], ...] = ()  # (violator, victim)
-    treaties_honored: tuple[tuple[int, int], ...] = ()
     renounced: tuple[tuple[int, int], ...] = ()  # (renouncer, counterpart)
-    contracts: tuple[SupplyContract, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -114,6 +114,8 @@ class TurnLog:
     deliveries: tuple[ContractDelivery, ...]
     firm_dice: np.ndarray  # (6, 5, 4)
     extra: dict[str, np.ndarray] = field(default_factory=dict)
+    violations: tuple[treaties_mod.Violation, ...] = ()
+    loans: tuple[treaties_mod.LoanPayment, ...] = ()
 
 
 def subsidy_matrix(subsidy_credits: np.ndarray, target: np.ndarray, revenue_last: np.ndarray) -> np.ndarray:
@@ -198,6 +200,8 @@ def _step(
     welfare_c = state.welfare_share * gdp_last
     military_c = state.military_share * gdp_last
     subsidy = subsidy_matrix(state.subsidy_share * gdp_last, state.subsidy_target, state.revenue)
+    subsidy = subsidy + state.industry_subsidy * gdp_last[:, None]  # BRONTIA's subsidize_industry
+    log_start = len(led.log)
 
     # ---- 1 production
     antitrust = inputs.antitrust if inputs.antitrust is not None else np.zeros((n_c, n_s), dtype=np.int64)
@@ -263,7 +267,7 @@ def _step(
         kappa=w.trade.kappa,
         sigma=w.trade.sigma_trade,
         passes=w.trade.allocation_passes,
-        contracts=inputs.contracts,
+        contracts=treaties_mod.supply_contracts(state.treaties),
         ledger=led,
         payer_weights=payers[:, :N_TRADED],
         home_bias=w.trade.home_bias,
@@ -358,6 +362,7 @@ def _step(
             led.transfer(government(i), households(i), welfare_c[i], "welfare")
         if interest[i] > 0:
             led.transfer(government(i), BOND_MARKET, interest[i], "interest on debt")
+    led, loans = treaties_mod.pay_loans(led, state.treaties, t, state.sanction)  # §10 loan payments
     # Backstop (D35): only if import bills alone exceeded the household budget can cash end below 0;
     # the bond market then tops households up to 0. Logged; zero in normal runs (tested).
     backstop = np.maximum(-np.array([led.balance(households(i)) for i in range(n_c)]), 0.0)
@@ -411,19 +416,23 @@ def _step(
     saving = monetary.saving_rate(rate, s0=m.s0, k_r=m.k_r, r_n=m.r_n, s_min=m.saving_min, s_max=m.saving_max)
 
     # ---- 11 firms (FIRMS stream; frozen during burn-in)
-    fu = _frozen_firms(state) if burn_in else firms_mod.update_firms(
-        firm_lists=state.firms,
-        nationalized=state.nationalized,
-        dominance_age=state.dominance_age,
-        mu=state.markup,
-        entry_boost=shocks.entry_boost(state),
-        breakup_omega=cp.breakup_omega,
-        entry_mult=cp.entry_mult,
-        p=w.firms,
-        rng=rng,
-        turn=t,
-        country_names=COUNTRIES,
-        sector_names=SECTORS,
+    fu = (
+        _frozen_firms(state)
+        if burn_in
+        else firms_mod.update_firms(
+            firm_lists=state.firms,
+            nationalized=state.nationalized,
+            dominance_age=state.dominance_age,
+            mu=state.markup,
+            entry_boost=shocks.entry_boost(state),
+            breakup_omega=cp.breakup_omega,
+            entry_mult=cp.entry_mult,
+            p=w.firms,
+            rng=rng,
+            turn=t,
+            country_names=COUNTRIES,
+            sector_names=SECTORS,
+        )
     )
     events += fu.events
 
@@ -463,23 +472,23 @@ def _step(
         events.append(Event("leader_change", int(i), detail=label))
 
     # ---- 14 trust
-    contract_violations = tuple(
-        (c.seller, c.buyer)
-        for c, d in zip(_goods_order(inputs.contracts), tr.deliveries, strict=True)
-        if d.policy_caused
+    # ---- 15 treaties: violations (§10) and honored treaties feed trust; then statuses update
+    violations = treaties_mod.find_violations(
+        state.treaties, state.tariff, state.sanction, tr.deliveries, loans
     )
+    new_treaties, honored = treaties_mod.settle(state.treaties, t, violations)
     new_trust = trust_mod.update_trust(
         state.trust,
         trust_mod.TrustEvents(
-            violations=inputs.violations + contract_violations,
+            violations=tuple((v.violator, v.victim) for v in violations),
             sanctions=inputs.sanctions_imposed,
-            honored=inputs.treaties_honored,
+            honored=honored,
             renounced=inputs.renounced,
         ),
         w.trust,
     )
-
-    # ---- 15 treaties: execution, expiry and violation detection come with treaties.py (later phase)
+    events += [Event("treaty_violation", v.violator, detail=f"{v.treaty_id}: {v.reason}") for v in violations]
+    gov_revenue = _government_revenue(led, log_start, n_c)
 
     # ---- 16 snapshot
     s.ledger = led
@@ -497,6 +506,7 @@ def _step(
     s.stability, s.military = stab, mil
     s.leader_changes, s.leader_changed_turn = leader_changes, leader_turn
     s.trust, s.trade = new_trust, tr.flows
+    s.treaties, s.gov_revenue = new_treaties, gov_revenue
     s.active_shocks = shocks.age_shocks(state.active_shocks) + tuple(new_shocks)
     shocks.recompute_multipliers(s)
 
@@ -551,7 +561,10 @@ def _step(
             "bond_payout": rc.bond_payout,
             "unrest": ur.unrest,
             "leader_falls": ur.leader_falls,
+            "gov_revenue": gov_revenue,
         },
+        violations=violations,
+        loans=loans,
     )
     return s, log
 
@@ -576,9 +589,16 @@ def _energy_inputs(E: np.ndarray) -> np.ndarray:
     return out
 
 
-def _goods_order(contracts: tuple[SupplyContract, ...]) -> list[SupplyContract]:
-    """allocate_trade reports deliveries good by good; return the contracts in that same order."""
-    return [c for g in range(N_TRADED) for c in contracts if c.good == g]
+REVENUE_REASONS = ("taxes", "tariff", "export levy", "profit")
+
+
+def _government_revenue(led: Ledger, start: int, n_c: int) -> np.ndarray:
+    """Revenue this step (§6.7): taxes, tariffs, export levies and state-firm profits received."""
+    rev = np.zeros(n_c)
+    for tr in led.log[start:]:
+        if tr.dst.kind == "government" and tr.reason.startswith(REVENUE_REASONS):
+            rev[tr.dst.country] += tr.amount
+    return rev
 
 
 # ---------------------------------------------------------------------------- invariants

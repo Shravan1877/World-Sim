@@ -31,9 +31,12 @@ uv run ruff check
   `docs/calibration.md` (pass 3) and `docs/open_issues.md`.
 - **Phase 3 (firms, shocks, trust): done.** The 14-turn × 20-seed run with shocks and the
   energy_crunch scenario passes from the settled state.
-- **Phase 4 (in progress): calibration step (item 8) A and B done.** Required tests
-  `tests/test_roster.py` (each roster country is the top exporter of its good; net exports within
-  ±8% of GDP) and `tests/test_shock_bite.py` (energy_crunch costs importers ≥ 10 stability; an
-  aggressor bot can topple a leader) pass. Changes: bond-market payout by population (D52), re-run
-  calibration, k_m 7 / w_ref 0.08 / energy cap 10 (D53); see `docs/calibration.md` pass 4.
-  Items 1–7 (actions, validator, treaties, special powers, bots) are not built yet.
+- **Phase 4 (actions, treaties, bots, calibration): done.** Strict typed actions with a flat
+  `ActionIn` wire format and the full `TurnDecision` schema (`world/actions.py`), the validator
+  (Layer 1 rules and the Layer 2 fact check, `world/validator.py`), policy application and special
+  powers (`world/engine/policy.py`), treaties with execution and violation detection inside `step()`
+  (`world/engine/treaties.py`), briefings as data (`world/briefing.py`), six scripted bots
+  (status quo, tit-for-tat, greedy, cooperative, random, aggressor) and a plain-loop game
+  (`world/game.py`, `scripts/run_bot_game.py`). Required tests pass: 14-turn × 20-seed bot games,
+  macro signs (Phillips, Okun, price convergence), no country dominating the cooperative baseline,
+  roster characters and shock bite. Decisions D52–D60; numbers in `docs/calibration.md`.

@@ -16,6 +16,21 @@ keeps them in the repo.
 
 After these changes every §6.14 invariant holds: 14 turns × 20 seeds, with and without shocks.
 
+## Update after Phase 4 (2026-10-07): actions, treaties, bots
+
+All Phase 4 checks pass with no xfail (`docs/calibration.md`, Phase 4 checks). New items:
+- **S6, nominal GDP rewards hostile play (affects Phase 7 metrics).** Deficit-financed military
+  spending creates money (D48), so in AggressorBot self-play nominal world GDP rises 1.6–1.7× while
+  real GDP falls to 0.73 (CPI 2.4×). §12.2 Power uses GDP shares and §12.3 efficiency uses world GDP;
+  with nominal GDP a country that inflates its currency looks stronger. **Proposed CLAUDE.md edit
+  (not applied):** define GDP in §12.2 Power and in the §12.3 efficiency metric as real GDP (GDP /
+  CPI, CPI at the settled state = base), and report money growth per run (already noted under D48).
+- **S5 confirmed with real bots:** AggressorBot self-play has 212 leader falls in 10 seeds × 14 turns
+  (status quo: 2). With one aggressor among status-quo bots, the leader who falls is almost always
+  the aggressor's own (calibration pass 4).
+- **Loans:** an installment the borrower cannot pay is lost (paid in part), not carried over (D57).
+  Agents could exploit this by emptying their treasury before a payment; watch it in LLM runs.
+
 ## Update after D52–D53 (2026-10-07, Phase 4 calibration pass 4)
 
 - **S2 resolved (D52):** the blocker was the D37 payout key (bond-market surplus pro rata to household

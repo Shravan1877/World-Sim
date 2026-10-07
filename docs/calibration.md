@@ -523,3 +523,43 @@ shock bite and keeps aggressor falls robust (9–10 of 10 seeds for every seat).
 | `fiscal.bond_payout_weights` | (D37: cash) | **population** | D52, roster test A |
 | A table, consumption shares | §4.3 | tables above | D41/D52 calibration |
 | `food_floor` per country | — | tables above | D43 rule, recomputed |
+
+## Phase 4 checks (2026-10-07): bots, macro signs, no dominance
+
+D52 and D53 are confirmed (Locked). Report limit: `k_m = 7` gives stability a short memory: a shock or
+a hostile policy costs 15–30 points within a few turns, but stability pulls back toward 70 quickly
+once the cause stops, so slow declines are understated.
+
+**No parameter changed in this step.** Every check below passed on the first run, so no calibration
+pass was needed and nothing is marked xfail. Figures: `uv run python scripts/phase4_checks.py`
+writes `reports/figures/phase4_*.html`.
+
+| Check (§6.15) | Test | Required | Reached |
+|---|---|---|---|
+| Phillips sign | `tests/test_macro_signs.py` | Spearman(u, wage growth) < −0.5, p < 0.01 | −0.944 (n = 1680) |
+| Okun sign | same | Spearman(Δu, real GDP growth) < −0.2, p < 0.01, slope < 0 | −0.367, slope −0.97 |
+| Prices converge, rough start, no shocks | same | mean abs(ΔP/P) falls ≥ 10×, ends < 0.5%/turn | 11.0% → 0.23% |
+| Prices stay settled in the game, no shocks | same | turns 41–60 mean abs(ΔP/P) < 1.5% (every seed) | worst seed 0.93% |
+| No country dominates CooperativeBot | `tests/test_no_dominance.py` | power share ≤ 1/3; top gainer not the same in all seeds; abs(mean PG) ≤ 0.02 | max 0.282 (FALKEN, from its military); AURELIA 7, FALKEN 2, BRONTIA 1; max 0.010 |
+| Bot games, 14 turns × 20 seeds | `tests/test_bot_game.py` | no invariant failure | all pass (every bot type in every game) |
+| Status quo in the energy crunch / aggressor | `tests/test_shock_bite.py` (now with `AggressorBot`) | as pass 4 | unchanged |
+
+Why prices are tested in two parts: with firm entry and exit on (FIRMS stream), markups change every
+few turns, so prices keep moving about 0.5–1% per turn and never sit still; the burn-in mechanics
+(firm dynamics off) show the price rule itself converges (D60).
+
+### Every bot type in self-play (14 turns, seeds 1–10, random shocks on; nominal values)
+
+| Bot (self-play) | world GDP end/start | min stability | leader falls | accepted / rejected actions |
+|---|---|---|---|---|
+| aggressor | 1.587–1.743 | 0.0 | 212 | 4837 / 203 |
+| cooperative | 0.831–0.956 | 15.0 | 2 | 816 / 0 |
+| greedy | 1.014–1.226 | 15.0 | 3 | 660 / 1 |
+| random | 0.855–1.004 | 4.3 | 2 | 1115 / 126 |
+| status_quo | 0.829–0.955 | 18.4 | 2 | 0 / 0 |
+| tit_for_tat | 0.829–0.955 | 18.4 | 2 | 0 / 0 |
+
+Nominal GDP is misleading under hostile play: in real terms (GDP / CPI, seeds 1–5) the aggressor world
+shrinks to 0.73 of its start while CPI rises 2.4× and money 1.9× (deficit-financed military spending
+creates money, D48); greedy play: real 1.01, CPI 1.16. Status quo and cooperative: real 0.96, CPI 0.98.
+See `docs/open_issues.md` S6. Tit-for-tat in self-play equals status quo: nobody starts a fight.
