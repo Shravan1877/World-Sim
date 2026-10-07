@@ -47,13 +47,13 @@ def test_config_loads() -> None:
 
 def test_spot_values_match_claude_md() -> None:
     cfg = load_config()
-    assert cfg.countries.by_name("DORNE").productivity["ENERGY"] == 2.5
+    assert 0.7 * 2.5 <= cfg.countries.by_name("DORNE").productivity["ENERGY"] <= 1.3 * 2.5  # D41 band
     assert cfg.countries.by_name("EVERMERE").n_firms["TECH"] == 1
     assert cfg.countries.by_name("FALKEN").initial_trust_received == 0.5
-    assert cfg.countries.by_name("AURELIA").consumption_shares["SERVICES"] == 0.36
+    assert 0.7 * 0.36 <= cfg.countries.by_name("AURELIA").consumption_shares["SERVICES"] <= 1.3 * 0.36
     assert cfg.world.production.exponents["GOODS"].gamma == 0.35
     assert cfg.world.trade.sigma_trade == 3.0
-    assert cfg.world.burn_in.turns == 8
+    assert (cfg.world.burn_in.min_turns, cfg.world.burn_in.max_turns) == (8, 40)  # D44
     assert (cfg.world.horizon.min_, cfg.world.horizon.max_) == (10, 14)
     assert cfg.escalation.events["impose_sanction"] == 12
 

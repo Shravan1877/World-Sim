@@ -6,15 +6,13 @@ The price of good g in country i moves with post-trade excess demand:
     D_eff = D + X_req          own demand + what foreign buyers asked from i (before rationing)
     S_eff = S_dom + imports    own supply (stock after inputs + Q) + what i actually received
     P'    = P * (1 + clip(sigma_p * (D_eff - S_eff) / (S_eff + eps), -cap, +cap))
-SERVICES is non-traded and perishable: D_eff = D, S_eff = Q.
+Every good is traded (D40). SERVICES is perishable and has no stock, so its S_dom = Q and
+S_eff = Q + imports. Export requests and imports may cover fewer goods than demand (older tests).
 """
 
 from __future__ import annotations
 
 import numpy as np
-
-N_TRADED = 4
-SERVICES = 4
 
 
 def market_balance(
@@ -24,16 +22,16 @@ def market_balance(
     export_requests: np.ndarray,
     imports: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Build D_eff and S_eff (6, 5).
+    """Build D_eff = D + X_req and S_eff = S_dom + imports (6, 5).
 
-    Traded columns: D_eff = D + X_req, S_eff = S_dom + imports.
-    SERVICES column: D_eff = D, S_eff = Q (no stock, no trade).
+    `output` is kept in the signature for callers; with no SERVICES stock, S_dom already equals Q there.
     """
+    del output
+    n_tr = export_requests.shape[1]
     d_eff = demand.astype(float).copy()
     s_eff = supply_domestic.astype(float).copy()
-    d_eff[:, :N_TRADED] += export_requests
-    s_eff[:, :N_TRADED] += imports
-    s_eff[:, SERVICES] = output[:, SERVICES]
+    d_eff[:, :n_tr] += export_requests
+    s_eff[:, :n_tr] += imports
     return d_eff, s_eff
 
 

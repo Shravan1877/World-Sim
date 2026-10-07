@@ -39,3 +39,13 @@ def test_history_discarded() -> None:
     np.testing.assert_array_equal(s.gdp_hist, np.tile(s.gdp[:, None], (1, s.gdp_hist.shape[1])))
     assert np.all(s.leader_changes == 0) and s.active_shocks == ()
     assert all(s.ledger.balance(firm_account(i, g)) == 0.0 for i in range(6) for g in range(5))
+
+
+def test_burn_in_settles() -> None:
+    """D44: the burn-in stops because the economy settled, not because it hit max_turns."""
+    from world.engine.burn_in import settled_streak
+
+    b = CFG.world.burn_in
+    _, history = run_burn_in(CFG, 0)
+    assert settled_streak(history, b.settle_tol) >= b.settle_streak
+    assert b.min_turns <= len(history) - 1 <= b.max_turns

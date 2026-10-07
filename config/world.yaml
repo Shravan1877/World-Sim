@@ -5,7 +5,7 @@
 
 # --- §4.1 / §5: goods, time, units ---------------------------------------
 sectors: [FOOD, ENERGY, GOODS, TECH, SERVICES]   # index order is fixed everywhere in code
-traded_sectors: [FOOD, ENERGY, GOODS, TECH]      # SERVICES is non-traded
+traded_sectors: [FOOD, ENERGY, GOODS, TECH, SERVICES]   # D40: SERVICES is traded too (perishable)
 currency: credits
 turn_length: quarter
 periods_per_year: 4          # annual rate r -> quarterly r/4; annualized GDP = 4 x quarterly GDP
@@ -38,7 +38,6 @@ demand:
     GOODS: 0.25
     TECH: 0.12
     SERVICES: 0.28
-  f_min: 0.0272                        # D36: 0.7 x settled world FOOD output per person (docs/calibration.md); was 0.15
   wealth_spend_rate: 0.25              # c_w: share of household cash H spent each turn (calibrated, was 0.10; docs/calibration.md)
 
 # --- §6.4: trade ----------------------------------------------------------
@@ -52,8 +51,8 @@ trade:
 # --- §6.5: prices and inflation ------------------------------------------
 prices:
   initial_price: 1.0                   # every (country, good) at the start of burn-in
-  sigma_p: 0.1                         # calibrated, was 0.3 (docs/calibration.md)
-  max_change_per_turn: 0.05            # +/- cap on the price change per turn (calibrated, was 0.20)
+  sigma_p: 0.1                         # calibrated, spec 0.3 (docs/calibration.md)
+  max_change_per_turn: 0.20            # +/- cap on the price change per turn
   # CPI uses the fixed base-period consumption shares (demand.consumption_shares_*).
 
 # --- §6.5 / §6.14: stocks -------------------------------------------------
@@ -62,11 +61,12 @@ spoilage:                              # share of stock lost per turn (SERVICES 
   ENERGY: 0.05
   GOODS: 0.03
   TECH: 0.05
+  SERVICES: 1.0                        # D40: perishable, nothing unsold carries over
 
 # --- §6.6: labor market ---------------------------------------------------
 labor:
   psi: 0.5                             # wage response to excess labor demand
-  max_wage_change_per_turn: 0.20      # calibrated, was 0.10 (docs/calibration.md)
+  max_wage_change_per_turn: 0.10
 
 # --- §6.7: government budget, debt, default ------------------------------
 fiscal:
@@ -166,12 +166,16 @@ invariants:
 #   stock0[i,ENERGY] = stock_quarters * max(Q0[i,ENERGY], sum_g E0[i,g])   (enough to produce turn 1)
 #   H0 = s0 * Y_disp0 / c_w (the steady-state cash stock of §6.3)
 initial_state:
-  stock_quarters: 1.0
+  stock_quarters: 1.0                  # FOOD, GOODS, TECH start at this many quarters of output
+  energy_stock_turns: 1.5              # D44: ENERGY starts at 1.5 x planned firm energy input
   trust_self: 1.0                      # trust[i,i]; unused by the engine, kept in [0,1]
 
 # --- §6.15: burn-in -------------------------------------------------------
-burn_in:
-  turns: 8
+burn_in:                               # D44: run until settled
+  min_turns: 8
+  max_turns: 40
+  settle_tol: 0.01                     # max |GDP change| per turn, every country
+  settle_streak: 3                     # turns in a row below settle_tol
   policy: status_quo
   shocks: false
 

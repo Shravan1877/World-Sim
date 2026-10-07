@@ -27,6 +27,7 @@ class CountryParams:
     sanction_self_cost: np.ndarray
     leader_fall_prob: np.ndarray
     renounce_stability_cost: np.ndarray
+    food_floor: np.ndarray  # D43: f_min_i, FOOD units per person per quarter
 
 
 def country_params(cfg: Config) -> CountryParams:
@@ -42,4 +43,5 @@ def country_params(cfg: Config) -> CountryParams:
         renounce_stability_cost=_param(
             cfg, "renounce_stability_cost", w.stability.renounce_stability_cost_default
         ),
+        food_floor=np.array([c.food_floor for c in cfg.countries.countries], dtype=float),
     )

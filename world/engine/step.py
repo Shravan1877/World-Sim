@@ -37,7 +37,7 @@ from world.engine import stability as stab_mod
 from world.engine import trust as trust_mod
 from world.engine.params import country_params
 from world.engine.recycle import recycle
-from world.engine.state import ENERGY, FOOD, GOODS, N_TRADED, SERVICES, ActiveShock, Event, WorldState
+from world.engine.state import ENERGY, FOOD, GOODS, N_TRADED, ActiveShock, Event, WorldState
 from world.engine.trade import ContractDelivery, SupplyContract, allocate_trade
 from world.ledger import BOND_MARKET, LedgerError, government, households
 from world.ledger import firms as firm_account
@@ -233,8 +233,8 @@ def _step(
     )
     budget = np.maximum(cash_start + wages_paid.sum(axis=1) * (1.0 - state.tax_rate), 0.0)
     y_spend = np.clip(y_spend, 0.0, budget)
-    d_house, _ = demand_mod.household_demand(
-        state.consumption_shares, y_spend, P, w.demand.f_min, state.population
+    d_house, floor_binds = demand_mod.household_demand(
+        state.consumption_shares, y_spend, P, cp.food_floor, state.population
     )
     d_gov = demand_mod.government_goods_demand(military_c, P[:, GOODS])
     # D39: plan the firm energy stock so that after ENERGY spoilage it still covers E_d.
@@ -267,7 +267,6 @@ def _step(
     s_dom = prod.stock_after_inputs + Q
     available = s_dom.copy()
     available[:, :N_TRADED] += tr.imports - tr.exports
-    available[:, SERVICES] = Q[:, SERVICES]
     available = np.maximum(available, 0.0)
     fill = np.where(D > 0, np.minimum(available / np.where(D > 0, D, 1.0), 1.0), 1.0)
     taken = D * fill
@@ -347,13 +346,11 @@ def _step(
         eps=eps,
     )
     interest = fiscal.interest_due(state.debt, state.policy_rate, premium, ppy)
-    sav_int = monetary.savings_interest(cash_start, state.policy_rate, ppy)
     for i in range(n_c):
         if welfare_c[i] > 0:
             led.transfer(government(i), households(i), welfare_c[i], "welfare")
         if interest[i] > 0:
             led.transfer(government(i), BOND_MARKET, interest[i], "interest on debt")
-    led = monetary.pay_savings_interest(led, sav_int)
     # Backstop (D35): only if import bills alone exceeded the household budget can cash end below 0;
     # the bond market then tops households up to 0. Logged; zero in normal runs (tested).
     backstop = np.maximum(-np.array([led.balance(households(i)) for i in range(n_c)]), 0.0)
@@ -394,7 +391,7 @@ def _step(
     )
     led = rc.ledger
     y_disp = fiscal.disposable_income(
-        inc.wages, inc.profits_to_households, inc.taxes, welfare_c + rc.lump_sum + rc.bond_payout, sav_int
+        inc.wages, inc.profits_to_households, inc.taxes, welfare_c + rc.lump_sum + rc.bond_payout
     )
 
     # ---- 10 monetary
@@ -532,10 +529,10 @@ def _step(
             "y_spend": y_spend,
             "welfare": welfare_c,
             "subsidy": subsidy.sum(axis=1),
-            "savings_interest": sav_int,
             "state_profit": inc.state_profit,
             "loss_bond_market": inc.loss_bond_market,
             "household_backstop": backstop,
+            "food_floor_binds": floor_binds,
             "household_unbought": unbought,
             "gdp_ref": gdp_ref,
             "debt_repaid": rc.repaid,

@@ -186,8 +186,9 @@ worldsim/
 ### 4.1 Roster
 
 Goods and sectors (index order is fixed everywhere in code):
-`0 FOOD, 1 ENERGY, 2 GOODS, 3 TECH` are **traded**. `4 SERVICES` is **non-traded**
-(domestic only). One world currency, "credits". One turn = one quarter.
+All five goods `0 FOOD, 1 ENERGY, 2 GOODS, 3 TECH, 4 SERVICES` are **traded** (D40). SERVICES
+is perishable: no stock, nothing unsold carries over (spoilage 1.0). This lets AURELIA export finance
+and services. One world currency, "credits". One turn = one quarter.
 
 | Country | Character | Government | Special powers (beyond shared) | Weak spot |
 |---|---|---|---|---|
@@ -250,7 +251,9 @@ FOOD 0.60/0.20, ENERGY 0.50/0.10, GOODS 0.50/0.35, TECH 0.60/0.20, SERVICES 0.70
 
 Consumption budget shares (default all countries): FOOD 0.22, ENERGY 0.13, GOODS 0.25,
 TECH 0.12, SERVICES 0.28. AURELIA: SERVICES 0.36, GOODS 0.20, TECH 0.11, FOOD 0.21, ENERGY 0.12.
-Minimum food need: `f_min = 0.15` FOOD units per capita per quarter (calibrate).
+Minimum food need: `f_min_i` FOOD units per capita per quarter, per country (D43, `countries.yaml:
+food_floor`, set by `scripts/calibrate_balance.py`). The A table and consumption shares above are the
+reference values; the yaml holds the D41 calibrated values (each within ±30% of these).
 
 Firms per (country, sector): default n=4. Exceptions: DORNE ENERGY n=1 (dominant),
 EVERMERE TECH n=1 (dominant), BRONTIA GOODS n=3, FALKEN all sectors n=2.
@@ -348,8 +351,9 @@ In a steady state `H* = s·Y / c_w` and spending equals income, so the loop clos
 D[i,g] = share[i,g] · Y_spend_i / P[i,g]
 D[i,FOOD] = max(D[i,FOOD], f_min · pop_i)          # minimum food need (our addition)
 ```
-**f_min (D36)** = 0.7 × world FOOD output per person at the settled starting state (after burn-in,
-computed with the floor off). Arithmetic in `docs/calibration.md`.
+**f_min_i (D43, replaces D36)** = 0.7 × country i's own FOOD demand per person at the settled
+starting state (after burn-in, computed with the floor off). It does not bind at the settled state and
+binds in a harvest-failure shock (tested). Values in `countries.yaml: food_floor`.
 If the food floor binds, scale down the other goods' spending so total spending ≤ Y_spend.
 Government purchases: military spending buys GOODS domestically, `D_gov[i,GOODS] = military_i / P[i,GOODS]`.
 The **total** demand used in trade (§6.4), prices (§6.5) and consumption is
@@ -374,7 +378,8 @@ Subsidies are cash to firms in the targeted sector (enters `R̃`).
 
 ### 6.4 Trade (Armington with trust, rationed)
 
-Run for each traded good g ∈ {FOOD, ENERGY, GOODS, TECH}.
+Run for each traded good g ∈ {FOOD, ENERGY, GOODS, TECH, SERVICES} (D40). SERVICES has no stock, so
+`S_dom[i,SERVICES] = Q[i,SERVICES]`.
 ```
 S_dom[i,g]  = stock[i,g] + Q[i,g]
 X[j,g]      = max(S_dom[j,g] − D[j,g], 0) · export_cap[j,g]      # exportable surplus
@@ -420,8 +425,8 @@ P'[i,g] = P[i,g] · (1 + clip(σ_p · (D_eff[i,g] − S_eff[i,g]) / (S_eff[i,g] 
 requests that rationing cut). **Why:** the old rule `S_dom − exports` made an exporter that sold its whole
 surplus look "balanced", so its price never rose. A toy test (A makes 100, home demand 40, B asks 100):
 old rule → exporter price +0%, new rule → +12%. Importers are unchanged (unmet need still pushes
-price up). `D[i,GOODS]` here already includes `D_gov` (§6.3). `σ_p = 0.3`. The ±20% cap per turn is our safety limit. (Calibrated to `σ_p = 0.1` and ±5% in `world.yaml`; the checks below use 0.3 and ±20%. See `docs/calibration.md`.) SERVICES is non-traded:
-`S_eff = Q` (no stock, perishable, no imports).
+price up). `D[i,GOODS]` here already includes `D_gov` (§6.3). `σ_p = 0.3`. The ±20% cap per turn is our safety limit. (Calibrated to `σ_p = 0.1` in `world.yaml`; the checks below use 0.3. See `docs/calibration.md`.) SERVICES is traded
+(D40) and has no stock: `S_eff = Q + imports`, `D_eff = D + X_req`, like every other good.
 Check: P=10, S=100, D=150 → 11.5; D=300 → capped at 12. With fixed supply 100 and spending
 1000, the price converges to 10.
 CPI uses fixed base-period consumption shares: `CPI_i = Σ_g share[i,g]·P[i,g]`;
@@ -435,7 +440,6 @@ employed_i = min(LF_i, Σ_g L_d[i,g])
 u_i        = 1 − employed_i / LF_i
 w'_i       = w_i · (1 + clip(ψ · (Σ_g L_d[i,g] − LF_i) / LF_i, −0.10, +0.10))
 ```
-(The ±0.10 wage cap is calibrated to ±0.20 in `world.yaml`; see `docs/calibration.md`.)
 `ψ = 0.5`. Pandemic shocks lower `LF` temporarily.
 
 ### 6.7 Government budget, debt, default
@@ -467,9 +471,9 @@ market account), stability −20, `default_premium += 0.05` for 8 turns, and whi
 a country cannot set spending such that `outlays > revenue` (validator enforces this).
 Check: household income 1000, tax 20% → 200; outlays excluding interest 250; debt 500 at a 12% annual
 rate (3% per quarter) → interest 15 → treasury change −65.
-Household income: `Y_disp_i = wages_i + private_profits_i − taxes_i + welfare_i + interest_on_savings_i`,
-which equals `(wages_i + private_profits_i)·(1 − tax_rate_i) + welfare_i + interest_on_savings_i`
-whenever the base is positive. Here `private_profits_i` is what households actually bore: profits
+Household income: `Y_disp_i = wages_i + private_profits_i − taxes_i + transfers_i`, with transfers =
+welfare + the D37 money-loop payments, which equals `(wages_i + private_profits_i)·(1 − tax_rate_i) +
+transfers_i` whenever the base is positive. There is no `interest_on_savings` term (D42). Here `private_profits_i` is what households actually bore: profits
 received minus the losses they covered (D33).
 
 ### 6.8 Monetary policy (Taylor-style rule)
@@ -481,8 +485,10 @@ r_i = max(r_n + π_t + a·(π_i^annual − π_t) + b·(u_n − u_i), 0)
 Check: π=6%, u=4% → 6.5%. AURELIA may override with `set_policy_rate`.
 The rate acts on demand through saving:
 `s_i = clip(s0 + k_r·(r_i − r_n), 0.0, 0.4)` with `s0 = 0.10`, `k_r = 1.5`.
-Savings stay as household cash `H_i` in the ledger (money is conserved), are partly spent back (§6.3),
-and earn `r_i/4` from the bond market account.
+Savings stay as household cash `H_i` in the ledger (money is conserved) and are partly spent back
+(§6.3). **D42:** there is no separate savings-interest payment from the bond market (it created money
+and drove an inflation loop). Households' interest income is the D37 sweep of the bond market's
+surplus (government interest). The rate acts on demand only through the saving rate `s_i`.
 
 ### 6.9 Firms, monopolies, antitrust, entry
 
@@ -568,7 +574,7 @@ is shown in briefings.
 2. For each good: Σ exports = Σ imports (world).
 3. Stock-flow (`stock` = start-of-turn stock): `stock' = stock + Q + imports − exports − consumption − energy_inputs − spoilage`
    (energy_inputs counted once only, see §6.2; military GOODS purchases count as consumption)
-   (spoilage δ: FOOD 0.20, ENERGY 0.05, GOODS 0.03, TECH 0.05 per turn).
+   (spoilage δ: FOOD 0.20, ENERGY 0.05, GOODS 0.03, TECH 0.05, SERVICES 1.0 per turn; SERVICES stock is always 0, D40).
 4. No negative stocks, prices, wages, labor, treasury (debt absorbs negatives). Firm accounts end
    each turn at 0 (§6.9). Household cash `H_i ≥ 0`.
 5. `0 ≤ u ≤ 1`, `0 ≤ Stab ≤ 100`, `0 ≤ trust ≤ 1`, shares sum to 1.
@@ -578,8 +584,10 @@ keep the checkpoint, never "continue anyway".
 
 ### 6.15 Burn-in and calibration
 
-Before turn 1, run `burn_in_turns = 8` turns with the `status_quo` bot for every country and
-no shocks, starting from prices 1.0 and rough stocks/wages. Discard the burn-in history and
+Before turn 1, run the `status_quo` bot for every country with no shocks, starting from prices
+1.0 and rough stocks/wages, **until settled (D44):** every country's |GDP change| < 1% per turn for 3
+turns in a row, at least 8 and at most 40 turns (`world.yaml: burn_in`). Initial ENERGY stock = 1.5 ×
+planned firm energy input. Discard the burn-in history and
 start the game from the settled state.
 **D38:** during burn-in stability is held at its starting value and has no effects (no unrest, leader
 fall or default stability hit), and firm dynamics (breakup, entry, exit) are off, so the burn-in
@@ -643,7 +651,7 @@ turn. Ranges are validated (§11.5).
 | set_spending | welfare, military, subsidy ∈ [0, 0.4] each (share of GDP), sum ≤ 0.6 | all | spending plan |
 | set_subsidy_target | sector | all | where subsidy goes (efficiency η: BRONTIA 1.0, others 0.5) |
 | subsidize_industry | sector, amount_share ∈ [0, 0.1] | BRONTIA | extra targeted subsidy, η=1.0 |
-| set_tariff | target, good ∈ {FOOD,ENERGY,GOODS,TECH,ALL}, rate ∈ [0, 1] | all | τ[i,target,good] |
+| set_tariff | target, good ∈ {FOOD,ENERGY,GOODS,TECH,SERVICES,ALL}, rate ∈ [0, 1] | all | τ[i,target,good] |
 | set_sanction | target, on: bool | all | full bilateral trade block |
 | propose_treaty | target, kind, terms, duration ∈ [1, 8] | all | creates a proposal (§10) |
 | accept_treaty / reject_treaty | treaty_id | addressee | activates or declines |
@@ -1169,6 +1177,11 @@ Video rule: record replays of finished runs. Never run live.
 | D37 | Money loop: (a) positive `bond_market` balance paid to households pro rata to `H`; (b) treasury cash above 0.5 quarters of outlays repays debt, then goes to households as a lump sum once debt is 0. Logged ledger transfers (§6.7) | Locked (owner decision 2026-10-06) |
 | D38 | Burn-in implemented (§6.15): 8 status-quo turns, no shocks, stability held and without effects, firm dynamics off; then reset stability, discard history; settled state saved as a test fixture. Stability is reset to each country's configured start (70; FALKEN 60, CERES 65 per §4.3) | Locked (owner decision 2026-10-06) |
 | D39 | Energy spoilage: firm energy stock planned as `E_d / (1 − spoilage_ENERGY)` (§6.3) | Locked (owner decision 2026-10-06) |
+| D40 | SERVICES is traded (perishable: no stock, `S_dom = Q`, spoilage 1.0). It joins the §6.4 trade loop and the §6.5 price rule (`S_eff = Q + imports`); tariffs may target it (§4.1, §6.4, §6.5, §6.14, §9) | Locked (owner decision 2026-10-06) |
+| D41 | Balanced-benchmark calibration (`scripts/calibrate_balance.py`): only A and consumption shares, each within ±30% of §4.3; objective: net exports within ±3% of GDP, no food-floor binding, no energy shortage at the settled state, roster characters kept. Results in yaml, before/after in `docs/calibration.md` | Locked (owner decision 2026-10-06) |
+| D42 | No savings-interest payment from the bond market; households' interest income is the D37 sweep; the rate acts through the saving rate only; `interest_on_savings` removed from `Y_disp` (§6.7, §6.8) | Locked (owner decision 2026-10-06) |
+| D43 | Food floor per country: `f_min_i` = 0.7 × settled FOOD demand per person of country i, stored per country in yaml; must not bind at the settled state and must bind in a harvest-failure test. Replaces D36 (§4.3, §6.3) | Locked (owner decision 2026-10-06) |
+| D44 | Burn-in runs until settled: max GDP change < 1%/turn for 3 turns in a row, min 8, max 40 turns; initial ENERGY stock = 1.5 × planned firm energy input; stability held at configured starts during burn-in; fixture re-saved (§6.15) | Locked (owner decision 2026-10-06) |
 
 ---
 

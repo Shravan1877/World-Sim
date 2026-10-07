@@ -16,6 +16,22 @@ keeps them in the repo.
 
 After these changes every §6.14 invariant holds: 14 turns × 20 seeds, with and without shocks.
 
+## Update after D40–D44 and calibration pass 2 (2026-10-06)
+
+Fixed: money loop (bond market ≈ 0, treasuries bounded), unemployment (≤ 8%), GDP stays in the band
+(0.94–1.33 × start, seed 1), D43 floor (does not bind at the settled state, binds in a harvest failure).
+Still open (numbers in `docs/calibration.md`, pass 2):
+- **P1 (burn-in does not converge):** after 40 turns GDP still moves > 1% per turn. Shortages of food
+  and energy come back in waves, and the settled state depends chaotically on tiny parameter changes
+  (rounding A in the 5th digit moves net exports by 5 points). Likely cause: §6.4 imports only fill
+  gaps, so who supplies what follows price paths, not productivity.
+- **P2 (prices):** relative prices at the settled state span 0.33–2.0.
+- **P3 (stability):** recurring 5–30% food/energy shortages × k_f = 3 / k_e = 1.5 cost up to 31
+  stability points a turn; stability sinks to 0–20 even with full employment and stable GDP.
+- **P4 (government-interest loop):** with inflation, the Taylor rate raises government interest, which
+  is borrowed (new money) and swept to households (D37). Removing savings interest (D42) did not remove
+  this path; it is quiet only while prices are stable.
+
 ## Update after D36–D39 and calibration pass 1 (2026-10-06)
 
 F1–F4 below were answered by D36 (food floor), D37 (money loop), D38 (burn-in) and D39 (energy

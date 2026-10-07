@@ -68,11 +68,21 @@ def test_market_balance_without_trade_and_services_rule() -> None:
     D = np.arange(1, 11, dtype=float).reshape(2, 5)
     S = np.full((2, 5), 7.0)
     Q = np.full((2, 5), 3.0)
-    zeros = np.zeros((2, 4))
+    S[:, 4] = Q[:, 4]  # SERVICES has no stock: S_dom = Q (D40)
+    zeros = np.zeros((2, 5))
     d_eff, s_eff = market_balance(D, S, Q, zeros, zeros)
     np.testing.assert_array_equal(d_eff, D)
-    np.testing.assert_array_equal(s_eff[:, :4], S[:, :4])
-    np.testing.assert_array_equal(s_eff[:, 4], Q[:, 4])  # SERVICES: S_eff = Q
+    np.testing.assert_array_equal(s_eff, S)
+
+
+def test_services_traded_like_other_goods() -> None:
+    """D40: SERVICES S_eff = Q + imports, D_eff = D + export requests."""
+    D = np.full((1, 5), 10.0)
+    Q = np.full((1, 5), 8.0)
+    req, imp = np.zeros((1, 5)), np.zeros((1, 5))
+    req[0, 4], imp[0, 4] = 3.0, 1.5
+    d_eff, s_eff = market_balance(D, Q.copy(), Q, req, imp)
+    assert d_eff[0, 4] == 13.0 and s_eff[0, 4] == 9.5
 
 
 def test_cpi_and_inflation() -> None:

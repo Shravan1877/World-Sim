@@ -9,7 +9,8 @@ countries:
     government: Autocracy
     weak_spot: One-industry economy; energy shocks hit hard; energy monopoly (n=1)
     labor_force: 90                    # millions of workers
-    productivity: {FOOD: 0.6, ENERGY: 2.5, GOODS: 0.6, TECH: 0.4, SERVICES: 0.8}
+    productivity: {FOOD: 0.59970, ENERGY: 2.80690, GOODS: 0.78000, TECH: 0.32680, SERVICES: 1.04000}  # D41 calibrated (docs/calibration.md)
+    consumption_shares: {FOOD: 0.23810, ENERGY: 0.13940, GOODS: 0.27020, TECH: 0.12630, SERVICES: 0.22600}  # D41 calibrated
     n_firms: {FOOD: 4, ENERGY: 1, GOODS: 4, TECH: 4, SERVICES: 4}
     tax_rate: 0.25
     debt_to_annual_gdp: 0.3
@@ -17,6 +18,7 @@ countries:
     spending: {welfare: 0.12, military: 0.03, subsidy: 0.02}
     stability: 70
     initial_trust_received: 0.7        # how much every other country trusts DORNE at start
+    food_floor: 0.03070                    # D43: f_min_i (set by scripts/calibrate_balance.py)
     special_actions: [set_energy_export_quota, set_energy_export_levy]
     params: {}
 
@@ -25,7 +27,8 @@ countries:
     government: Technocracy
     weak_spot: Needs imported energy for factories; low wages
     labor_force: 200
-    productivity: {FOOD: 0.9, ENERGY: 0.4, GOODS: 2.0, TECH: 0.9, SERVICES: 0.9}
+    productivity: {FOOD: 0.72280, ENERGY: 0.42430, GOODS: 1.89060, TECH: 0.87400, SERVICES: 0.99580}  # D41 calibrated (docs/calibration.md)
+    consumption_shares: {FOOD: 0.26370, ENERGY: 0.11340, GOODS: 0.23340, TECH: 0.08400, SERVICES: 0.30550}  # D41 calibrated
     n_firms: {FOOD: 4, ENERGY: 4, GOODS: 3, TECH: 4, SERVICES: 4}
     tax_rate: 0.25
     debt_to_annual_gdp: 0.5
@@ -33,6 +36,7 @@ countries:
     spending: {welfare: 0.12, military: 0.03, subsidy: 0.02}
     stability: 70
     initial_trust_received: 0.7
+    food_floor: 0.01271                    # D43: f_min_i (set by scripts/calibrate_balance.py)
     special_actions: [subsidize_industry]
     params:
       subsidy_efficiency: 1.0          # eta (others 0.5)
@@ -42,7 +46,8 @@ countries:
     government: Democracy
     weak_spot: Small industry; weak treasury; high debt
     labor_force: 120
-    productivity: {FOOD: 2.2, ENERGY: 0.5, GOODS: 0.6, TECH: 0.4, SERVICES: 0.8}
+    productivity: {FOOD: 1.54910, ENERGY: 0.42240, GOODS: 0.70470, TECH: 0.32470, SERVICES: 0.71610}  # D41 calibrated (docs/calibration.md)
+    consumption_shares: {FOOD: 0.21892, ENERGY: 0.13871, GOODS: 0.27984, TECH: 0.11751, SERVICES: 0.24502}  # D41 calibrated
     n_firms: {FOOD: 4, ENERGY: 4, GOODS: 4, TECH: 4, SERVICES: 4}
     tax_rate: 0.25
     debt_to_annual_gdp: 0.8
@@ -50,6 +55,7 @@ countries:
     spending: {welfare: 0.12, military: 0.03, subsidy: 0.02}
     stability: 65
     initial_trust_received: 0.7
+    food_floor: 0.02533                    # D43: f_min_i (set by scripts/calibrate_balance.py)
     special_actions: [set_food_export_ban]
     params:
       leader_fall_prob: 0.8            # fast turnover: "election loss"
@@ -60,7 +66,8 @@ countries:
     government: Military state
     weak_spot: Others trust it less (starting trust 0.5); lower productivity
     labor_force: 140
-    productivity: {FOOD: 1.0, ENERGY: 0.9, GOODS: 1.1, TECH: 0.6, SERVICES: 0.7}
+    productivity: {FOOD: 0.80940, ENERGY: 1.01540, GOODS: 1.11140, TECH: 0.55340, SERVICES: 0.76040}  # D41 calibrated (docs/calibration.md)
+    consumption_shares: {FOOD: 0.20860, ENERGY: 0.12290, GOODS: 0.26190, TECH: 0.15600, SERVICES: 0.25060}  # D41 calibrated
     n_firms: {FOOD: 2, ENERGY: 2, GOODS: 2, TECH: 2, SERVICES: 2}
     tax_rate: 0.30
     debt_to_annual_gdp: 0.9
@@ -68,6 +75,7 @@ countries:
     spending: {welfare: 0.08, military: 0.08, subsidy: 0.02}
     stability: 60
     initial_trust_received: 0.5
+    food_floor: 0.01440                    # D43: f_min_i (set by scripts/calibrate_balance.py)
     special_actions: [nationalize, renounce_treaty]
     params:
       military_efficiency: 1.5
@@ -79,7 +87,8 @@ countries:
     government: Oligarchic republic
     weak_spot: Imports almost all food and energy; small population
     labor_force: 60
-    productivity: {FOOD: 0.5, ENERGY: 0.3, GOODS: 0.9, TECH: 1.3, SERVICES: 2.2}
+    productivity: {FOOD: 0.35000, ENERGY: 0.35690, GOODS: 1.17000, TECH: 1.58860, SERVICES: 1.96080}  # D41 calibrated (docs/calibration.md)
+    consumption_shares: {FOOD: 0.23100, ENERGY: 0.10660, GOODS: 0.22460, TECH: 0.09920, SERVICES: 0.33860}  # D41 calibrated
     n_firms: {FOOD: 4, ENERGY: 4, GOODS: 4, TECH: 4, SERVICES: 4}
     tax_rate: 0.20
     debt_to_annual_gdp: 0.6
@@ -87,7 +96,7 @@ countries:
     spending: {welfare: 0.10, military: 0.02, subsidy: 0.01}
     stability: 70
     initial_trust_received: 0.7
-    consumption_shares: {FOOD: 0.21, ENERGY: 0.12, GOODS: 0.20, TECH: 0.11, SERVICES: 0.36}
+    food_floor: 0.02154                    # D43: f_min_i (set by scripts/calibrate_balance.py)
     special_actions: [set_policy_rate]
     params:
       sanction_self_cost: 0.15         # "cheap sanctions": 30% of the normal 0.5
@@ -98,7 +107,8 @@ countries:
     government: Corporate democracy
     weak_spot: Small population; imports food and energy; dominant tech firm (n=1) at start
     labor_force: 70
-    productivity: {FOOD: 0.5, ENERGY: 0.5, GOODS: 1.0, TECH: 2.4, SERVICES: 1.4}
+    productivity: {FOOD: 0.37490, ENERGY: 0.42320, GOODS: 0.96960, TECH: 2.12070, SERVICES: 1.09280}  # D41 calibrated (docs/calibration.md)
+    consumption_shares: {FOOD: 0.22948, ENERGY: 0.12399, GOODS: 0.21368, TECH: 0.11389, SERVICES: 0.31896}  # D41 calibrated
     n_firms: {FOOD: 4, ENERGY: 4, GOODS: 4, TECH: 1, SERVICES: 4}
     tax_rate: 0.25
     debt_to_annual_gdp: 0.7
@@ -106,6 +116,7 @@ countries:
     spending: {welfare: 0.12, military: 0.03, subsidy: 0.02}
     stability: 70
     initial_trust_received: 0.7
+    food_floor: 0.01485                    # D43: f_min_i (set by scripts/calibrate_balance.py)
     special_actions: []                # its powers are parameters + the random move slot
     params:
       antitrust_strength: 0.30         # 2x the default 0.15

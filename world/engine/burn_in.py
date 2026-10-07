@@ -1,7 +1,9 @@
 """Burn-in (CLAUDE.md §6.15, D38): settle the rough starting state before turn 1.
 
-Run `burn_in.turns` (8) turns with the status-quo policy (nobody acts), no shocks, firm dynamics off,
-and stability held at its starting value with no effects (step(..., burn_in=True)). Then:
+Run the status-quo policy (nobody acts), no shocks, firm dynamics off, stability held at its
+starting value with no effects (step(..., burn_in=True)) until the economy has settled (D44):
+every country's |GDP change| < settle_tol (1%) for settle_streak (3) turns in a row, with at least
+min_turns (8) and at most max_turns (40) turns. Then:
   - reset the turn counter to 0 and stability to its configured starting value (§4.3);
   - discard the burn-in history: a fresh ledger that opens at the settled balances, GDP window and
     starting GDP (D32) = the settled GDP, no leader changes, no active shocks.
@@ -27,15 +29,34 @@ from world.rng import RngBundle
 FIXTURE = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "settled_state.pkl"
 
 
+def settled_streak(history: list[WorldState], tol: float) -> int:
+    """How many of the most recent turns had every country's |GDP change| below tol."""
+    n = 0
+    for prev, cur in zip(reversed(history[:-1]), reversed(history[1:]), strict=True):
+        change = np.abs(cur.gdp / np.maximum(prev.gdp, 1e-12) - 1.0)
+        if np.all(change < tol):
+            n += 1
+        else:
+            break
+    return n
+
+
 def run_burn_in(cfg: Config, seed: int = 0) -> tuple[WorldState, list[WorldState]]:
-    """Returns (settled state, the states after each burn-in turn, for calibration reports)."""
+    """Returns (settled state, the states after each burn-in turn, for calibration reports).
+
+    If the economy has not settled after max_turns, the last state is used; callers can check
+    `settled_streak(history, tol) >= streak` (tests/test_burn_in.py does).
+    """
+    b = cfg.world.burn_in
     s = initial_state(cfg, seed)
     rng = RngBundle(seed)
     history = [s]
-    for _ in range(cfg.world.burn_in.turns):
-        s, _ = turn_start(s, rng, cfg, shocks_on=cfg.world.burn_in.shocks)
+    for t in range(b.max_turns):
+        s, _ = turn_start(s, rng, cfg, shocks_on=b.shocks)
         s, _ = step(s, None, rng, cfg, burn_in=True)
         history.append(s)
+        if t + 1 >= b.min_turns and settled_streak(history, b.settle_tol) >= b.settle_streak:
+            break
     return settle(s, cfg), history
 
 

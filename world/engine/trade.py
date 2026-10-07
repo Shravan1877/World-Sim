@@ -1,6 +1,7 @@
 """Armington-with-trust trade allocation, rationing and payments (CLAUDE.md §6.4).
 
-For each traded good g (FOOD, ENERGY, GOODS, TECH):
+For each traded good g (FOOD, ENERGY, GOODS, TECH, SERVICES; D40). The number of goods is taken
+from the array shapes. SERVICES has no stock, so its S_dom is just Q.
   S_dom[i]  = stock[i] + Q[i]                       (stock is AFTER energy inputs, §6.2)
   X[j]      = max(S_dom[j] - D[j], 0)               exportable surplus
   M[i]      = max(D[i] - S_dom[i], 0)               import need
@@ -31,7 +32,7 @@ import numpy as np
 
 from world.ledger import Account, Ledger, firms, government, households
 
-N_TRADED = 4
+N_TRADED = 5
 N_PAYERS = 3  # payer_weights[..., k]: 0 households, 1 government, 2 the importer's own firms[i, g]
 
 
@@ -149,10 +150,10 @@ def allocate_trade(
     payer_weights (6, 4, 3): who pays for country i's purchases of good g (see module doc).
     Returns a new ledger; the input ledger is not changed.
     """
-    n = stock.shape[0]
+    n, n_goods = stock.shape
     ledger = ledger.copy()
     if payer_weights is None:
-        payer_weights = np.zeros((n, N_TRADED, N_PAYERS))
+        payer_weights = np.zeros((n, n_goods, N_PAYERS))
         payer_weights[:, :, 0] = 1.0
     s_dom = stock + output
     surplus = np.maximum(s_dom - demand, 0.0)
@@ -160,12 +161,12 @@ def allocate_trade(
     cost = landed_cost(price, levy, tariff)
     open_pair = ~blocked_pairs(sanction)
 
-    flows = np.zeros((n, n, N_TRADED))
-    requests = np.zeros((n, N_TRADED))
-    unmet = np.zeros((n, N_TRADED))
+    flows = np.zeros((n, n, n_goods))
+    requests = np.zeros((n, n_goods))
+    unmet = np.zeros((n, n_goods))
     deliveries: list[ContractDelivery] = []
 
-    for g in range(N_TRADED):
+    for g in range(n_goods):
         pair_rem = export_cap[:, :, g] * surplus[None, :, g]  # [i, j]: what j may still send to i
         x_rem = surplus[:, g].copy()
         m_rem = need[:, g].copy()

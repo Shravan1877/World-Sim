@@ -138,7 +138,7 @@ def test_income_identity_full_turns(seed: int) -> None:
 
     Everything except y_disp is read back from the ledger log of the turn (not from engine arrays):
       y_disp_i + (taxes + tariffs + levies + state profits)_i
-        = sales value added_i + subsidies_i + welfare_i + savings interest_i
+        = sales value added_i + subsidies_i + welfare_i
           + tariffs_i + levies_i + losses the bond market covered_i
           + treasury surplus and bond-market surplus paid to households_i (D37)
     Sales value added = what the country's firms took in from outside (sales, exports) minus what
@@ -173,7 +173,6 @@ def test_income_identity_full_turns(seed: int) -> None:
             va = firm_in - firm_out
             subsidy = _sum(new, "subsidy", dst_kind="firms", country=i)
             welfare = _sum(new, "welfare", dst_kind="households", country=i)
-            sav = _sum(new, "savings interest", dst_kind="households", country=i)
             tariffs = _sum(new, "tariff", dst_kind="government", country=i, startswith=True)
             levies = _sum(new, "export levy", dst_kind="government", country=i, startswith=True)
             taxes = _sum(new, "taxes", dst_kind="government", country=i)
@@ -185,6 +184,6 @@ def test_income_identity_full_turns(seed: int) -> None:
             # D37 transfers to households
             lump = _sum(new, "treasury surplus to households", dst_kind="households", country=i)
             bond_pay = _sum(new, "bond market surplus to households", dst_kind="households", country=i)
-            rhs = va + subsidy + welfare + sav + tariffs + levies + bond_loss + lump + bond_pay
+            rhs = va + subsidy + welfare + tariffs + levies + bond_loss + lump + bond_pay
             assert lhs == pytest.approx(rhs, rel=1e-9, abs=1e-9)
             assert taxes == pytest.approx(log.taxes[i])

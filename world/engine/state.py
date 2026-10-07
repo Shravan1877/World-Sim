@@ -22,7 +22,7 @@ from world.ledger import BOND_MARKET, Account, Ledger, all_accounts, government,
 
 N_COUNTRIES = len(COUNTRIES)
 N_SECTORS = len(SECTORS)
-N_TRADED = 4
+N_TRADED = 5  # D40: every good is traded (SERVICES is perishable: spoilage 1.0, stock always 0)
 FOOD, ENERGY, GOODS, TECH, SERVICES = range(N_SECTORS)
 
 
@@ -287,7 +287,7 @@ def initial_state(cfg: Config, seed: int) -> WorldState:
     gdp = revenue.sum(axis=1) - price[:, ENERGY] * E0.sum(axis=1)
 
     stock = init.stock_quarters * Q0
-    stock[:, ENERGY] = init.stock_quarters * np.maximum(Q0[:, ENERGY], E0.sum(axis=1))
+    stock[:, ENERGY] = init.energy_stock_turns * E0.sum(axis=1)  # D44
     stock[:, SERVICES] = 0.0
 
     tax = _per_country(cfg, lambda c: c.tax_rate)

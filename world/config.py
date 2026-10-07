@@ -12,7 +12,7 @@ from world.rng import Stream
 
 # Fixed by CLAUDE.md. Config files must match these exactly; code indexes arrays in this order.
 SECTORS: tuple[str, ...] = ("FOOD", "ENERGY", "GOODS", "TECH", "SERVICES")
-TRADED_SECTORS: tuple[str, ...] = SECTORS[:4]
+TRADED_SECTORS: tuple[str, ...] = SECTORS  # D40: SERVICES is traded too (perishable)
 COUNTRIES: tuple[str, ...] = ("DORNE", "BRONTIA", "CERES", "FALKEN", "AURELIA", "EVERMERE")
 MOVE_ORDER: tuple[str, ...] = ("DORNE", "BRONTIA", "CERES", "FALKEN", "AURELIA")
 RANDOM_SLOT_COUNTRY = "EVERMERE"
@@ -26,7 +26,7 @@ Probability = Annotated[float, Field(ge=0.0, le=1.0)]
 NonNegative = Annotated[float, Field(ge=0.0)]
 Positive = Annotated[float, Field(gt=0.0)]
 Sector = Literal["FOOD", "ENERGY", "GOODS", "TECH", "SERVICES"]
-TradedSector = Literal["FOOD", "ENERGY", "GOODS", "TECH"]
+TradedSector = Literal["FOOD", "ENERGY", "GOODS", "TECH", "SERVICES"]
 CountryName = Literal["DORNE", "BRONTIA", "CERES", "FALKEN", "AURELIA", "EVERMERE"]
 
 
@@ -82,7 +82,6 @@ class ProductionCfg(Strict):
 
 class DemandCfg(Strict):
     consumption_shares_default: dict[Sector, float]
-    f_min: NonNegative
     wealth_spend_rate: Probability
 
     @field_validator("consumption_shares_default")
@@ -214,13 +213,25 @@ class InvariantsCfg(Strict):
 
 class InitialStateCfg(Strict):
     stock_quarters: NonNegative
+    energy_stock_turns: NonNegative  # D44: start ENERGY stock = this x planned firm energy input
     trust_self: Probability
 
 
 class BurnInCfg(Strict):
-    turns: Annotated[int, Field(ge=0)]
+    """D44: run until max |GDP change| < settle_tol for settle_streak turns in a row (min..max turns)."""
+
+    min_turns: Annotated[int, Field(ge=0)]
+    max_turns: Annotated[int, Field(ge=1)]
+    settle_tol: Positive
+    settle_streak: Annotated[int, Field(ge=1)]
     policy: Literal["status_quo"]
     shocks: bool
+
+    @model_validator(mode="after")
+    def _range(self) -> BurnInCfg:
+        if self.min_turns > self.max_turns:
+            raise ValueError("burn_in.min_turns must be <= max_turns")
+        return self
 
 
 class HorizonCfg(Strict):
@@ -391,6 +402,8 @@ class WorldConfig(Strict):
     @classmethod
     def _spoilage(cls, v: dict[str, float]) -> dict[str, float]:
         _check_sector_keys(v, TRADED_SECTORS, "spoilage")
+        if v["SERVICES"] != 1.0:
+            raise ValueError("spoilage.SERVICES must be 1.0: services are perishable (D40)")
         return v
 
     @field_validator("rng_streams")
@@ -466,6 +479,7 @@ class CountryCfg(Strict):
     stability: Annotated[float, Field(ge=0, le=100)]
     initial_trust_received: Probability
     consumption_shares: dict[Sector, float] | None = None
+    food_floor: NonNegative  # D43: f_min_i, minimum FOOD units per person per quarter
     special_actions: list[ActionName]
     params: CountryParams
 

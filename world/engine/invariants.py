@@ -15,7 +15,7 @@ import numpy as np
 
 from world.ledger import Ledger, LedgerError, firms
 
-N_TRADED = 4
+N_TRADED = 5
 
 
 class InvariantError(Exception):

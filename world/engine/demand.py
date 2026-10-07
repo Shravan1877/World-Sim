@@ -34,7 +34,7 @@ def household_demand(
     shares: np.ndarray,
     y_spend: np.ndarray,
     price: np.ndarray,
-    f_min: float,
+    f_min: float | np.ndarray,
     population: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Household quantity demand with the minimum food floor.

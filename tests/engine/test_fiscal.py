@@ -121,5 +121,5 @@ def test_default_premium_expires_after_8_turns_and_no_double_default() -> None:
 
 def test_disposable_income() -> None:
     tax = taxes(np.array([0.25]), np.array([100.0 + 20.0]))
-    y = disposable_income(np.array([100.0]), np.array([20.0]), tax, np.array([10.0]), np.array([2.0]))
-    assert y[0] == pytest.approx(120 * 0.75 + 12)  # (wages + private profits)(1 - tax) + welfare + interest
+    y = disposable_income(np.array([100.0]), np.array([20.0]), tax, np.array([12.0]))
+    assert y[0] == pytest.approx(120 * 0.75 + 12)  # (wages + private profits)(1 - tax) + transfers (D42)

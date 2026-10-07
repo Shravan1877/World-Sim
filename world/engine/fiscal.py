@@ -138,13 +138,14 @@ def disposable_income(
     wages: np.ndarray,
     private_profits: np.ndarray,
     taxes_paid: np.ndarray,
-    welfare: np.ndarray,
-    savings_interest: np.ndarray,
+    transfers: np.ndarray,
 ) -> np.ndarray:
-    """Y_disp = wages + private profits - taxes + welfare + interest on savings.
+    """Y_disp = wages + private profits - taxes + transfers (D31, D42).
 
-    With taxes = tax_rate * (wages + private profits) this is the §6.7 formula
-    (wages + private profits)(1 - tax) + welfare + interest. private_profits is what households
-    actually got: profits paid out minus the losses they covered (D33).
+    With taxes = tax_rate * (wages + private profits) this is (wages + private profits)(1 - tax)
+    + transfers. private_profits is what households actually got: profits paid out minus the losses
+    they covered (D33). Transfers = welfare + the D37 money-loop payments (treasury surplus, and the
+    bond-market sweep, which is how households receive interest; there is no separate savings
+    interest, D42).
     """
-    return wages + private_profits - taxes_paid + welfare + savings_interest
+    return wages + private_profits - taxes_paid + transfers

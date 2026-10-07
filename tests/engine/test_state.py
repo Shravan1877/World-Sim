@@ -21,7 +21,7 @@ def test_shapes(state: WorldState) -> None:
     for name in ("wage", "tax_rate", "debt", "gdp", "stability", "military", "population"):
         assert getattr(state, name).shape == (6,), name
     assert state.trust.shape == state.sanction.shape == (6, 6)
-    assert state.tariff.shape == state.export_cap.shape == state.trade.shape == (6, 6, 4)
+    assert state.tariff.shape == state.export_cap.shape == state.trade.shape == (6, 6, 5)
     assert len(state.firms) == 30
 
 
