@@ -16,6 +16,21 @@ keeps them in the repo.
 
 After these changes every §6.14 invariant holds: 14 turns × 20 seeds, with and without shocks.
 
+## Update after D52–D53 (2026-10-07, Phase 4 calibration pass 4)
+
+- **S2 resolved (D52):** the blocker was the D37 payout key (bond-market surplus pro rata to household
+  cash sent ~30% of world interest to DORNE). Paid by population now; settled net exports are −2.2% to
+  +3.1% of GDP and every roster country is the top exporter of its good (`tests/test_roster.py`).
+- **S1 partly addressed (D53):** w_ref = 0.08 removes FALKEN's permanent welfare drag. The flow minimum
+  is 41.9 (floor 40) with k_m = 7. Still open: k_m stays far from the spec (1) because status-quo play
+  has real background noise (firm exits cause short world food/energy shortages; mild deflation costs
+  2–5 points a turn through the inflation term; a debt-heavy country can default). A dead band on the
+  inflation term would be an equation change (needs owner approval).
+- **New, S5: the aggressor mostly topples itself.** In `tests/test_shock_bite.py` a country that
+  sanctions everyone and maxes military spending loses its own leader in almost every seed; victims
+  fall rarely (CERES most often). Sanctioning everyone is close to self-imposed autarky. Worth watching
+  when LLM agents play: the engine punishes broad sanctions hard and targeted ones lightly.
+
 ## Status after D45–D51 (2026-10-07): the flow CHECK passes
 
 All Phase 2 / Phase 3 checks pass with no xfail (20 seeds): GDP 0.75–1.02 × start, prices

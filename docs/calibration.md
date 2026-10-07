@@ -360,3 +360,166 @@ Burn-in settled after 29 turns.
 are outside ±3% of GDP for DORNE (−15.8%), BRONTIA (+8.4%), CERES (+6.8%), FALKEN (+4.3%) and
 EVERMERE (+3.6%), and AURELIA is not the largest SERVICES exporter. The flow CHECK passes anyway;
 see `docs/open_issues.md`.
+
+## Pass 4 (Phase 4 item 8, 2026-10-07): roster-character and shock-bite tests (D52, D53)
+
+Two new required tests: `tests/test_roster.py` (A) and `tests/test_shock_bite.py` (B). Both pass, along
+with the flow CHECK. The pass 3 tables above are superseded by the ones below.
+
+### A. Roster characters: what blocked it and the change (D52)
+
+Test A: at the settled state (trade averaged over the last 3 burn-in turns,
+`world.engine.burn_in.settled_trade_values`, the same numbers the calibration script uses), DORNE /
+CERES / BRONTIA / EVERMERE / AURELIA are the top exporters by export value of ENERGY / FOOD / GOODS /
+TECH / SERVICES, and every country's net exports are within ±8% of GDP.
+
+Before (pass 3 values): EVERMERE out-exported AURELIA in SERVICES (3.76 vs 3.41), DORNE's net exports
+were −15.8% of GDP and BRONTIA's +8.4%.
+
+1. **Yaml only first.** `scripts/calibrate_balance.py` got test A's criteria in its objective (top
+   exporter by gross export value, a hard ±8% band searched at ±6.5%) and a warm start from yaml
+   (`--from-yaml`, `--start-x`). 300 generations: all top exporters fixed, but DORNE stuck at
+   **−8.2%**, with its A and shares pinned at the ±30% edges (ENERGY A +30%, TECH and SERVICES shares
+   +30%, FOOD and GOODS shares near −30%). The band cannot be reached with yaml alone.
+2. **What blocks it: the D37 payout key.** The bond market's positive balance (every government's
+   interest and debt repayments) was paid to households *pro rata to their cash H*. DORNE has the
+   largest cash pile (63, about 4× its quarterly GDP) and no government debt, so it collected about 30%
+   of the world's interest every turn (1.37 per quarter), which, plus a slow spend-down of that pile,
+   paid for a trade deficit of 2.5 per quarter. It is also a rich-get-richer loop: more cash, more
+   payout, more cash.
+3. **Smallest change (D52):** pay that surplus pro rata to **population** instead. One line in
+   `world/engine/recycle.py`, behind a yaml switch `fiscal.bond_payout_weights: population` (`cash`
+   restores D37). Same money, same ledger, same conservation tests. With the pass 3 search vector it
+   alone moved DORNE from −8.2% to −6.1%; a further 100-generation search then reached:
+
+| Country | FOOD | ENERGY | GOODS | TECH | SERVICES | net exports % GDP |
+|---|---|---|---|---|---|---|
+| DORNE | 1.196 | **4.606** | 2.061 | 0.558 | 1.723 | −2.2% |
+| BRONTIA | 2.313 | 0.000 | **3.617** | 0.894 | 2.893 | −2.1% |
+| CERES | **2.792** | 0.000 | 1.314 | 0.814 | 2.263 | −1.9% |
+| FALKEN | 1.493 | 2.588 | 1.934 | 0.579 | 1.351 | +2.9% |
+| AURELIA | 0.741 | 0.000 | 1.497 | 0.898 | **3.679** | +2.0% |
+| EVERMERE | 1.131 | 0.000 | 1.747 | **1.652** | 2.840 | +3.1% |
+
+(export value per quarter, credits; bold = the roster country that must be top). Every country is
+within ±3.1%, so the old D41 ±3% objective is now met except for EVERMERE (+3.1%) by 0.1 points, and
+the net-exporter roster check in the script passes too. The burn-in settles in 28 turns.
+
+#### Productivity A, CLAUDE.md §4.3 → yaml (each within ±30%)
+
+| Country | FOOD | ENERGY | GOODS | TECH | SERVICES |
+|---|---|---|---|---|---|
+| DORNE | 0.60 → 0.6511 | 2.50 → 3.2500 | 0.60 → 0.7800 | 0.40 → 0.5200 | 0.80 → 1.0054 |
+| BRONTIA | 0.90 → 1.1700 | 0.40 → 0.2800 | 2.00 → 1.4000 | 0.90 → 0.6300 | 0.90 → 1.1700 |
+| CERES | 2.20 → 1.5400 | 0.50 → 0.3783 | 0.60 → 0.4200 | 0.40 → 0.5097 | 0.80 → 0.8282 |
+| FALKEN | 1.00 → 0.8686 | 0.90 → 1.1700 | 1.10 → 0.9741 | 0.60 → 0.4256 | 0.70 → 0.4900 |
+| AURELIA | 0.50 → 0.3500 | 0.30 → 0.2100 | 0.90 → 0.6300 | 1.30 → 0.9100 | 2.20 → 2.8600 |
+| EVERMERE | 0.50 → 0.5508 | 0.50 → 0.3500 | 1.00 → 0.7000 | 2.40 → 2.1807 | 1.40 → 1.5441 |
+
+#### Consumption shares, §4.3 → yaml, and D43 food floors
+
+| Country | FOOD | ENERGY | GOODS | TECH | SERVICES | food_floor |
+|---|---|---|---|---|---|---|
+| DORNE | 0.22 → 0.2182 | 0.13 → 0.0910 | 0.25 → 0.1750 | 0.12 → 0.1547 | 0.28 → 0.3611 | 0.02872 |
+| BRONTIA | 0.22 → 0.2631 | 0.13 → 0.0910 | 0.25 → 0.1750 | 0.12 → 0.1435 | 0.28 → 0.3274 | 0.02077 |
+| CERES | 0.22 → 0.2514 | 0.13 → 0.0958 | 0.25 → 0.3250 | 0.12 → 0.0885 | 0.28 → 0.2393 | 0.03433 |
+| FALKEN | 0.22 → 0.2561 | 0.13 → 0.1514 | 0.25 → 0.2910 | 0.12 → 0.1055 | 0.28 → 0.1960 | 0.02059 |
+| AURELIA | 0.21 → 0.1470 | 0.12 → 0.0891 | 0.20 → 0.2280 | 0.11 → 0.1254 | 0.36 → 0.4105 | 0.00752 |
+| EVERMERE | 0.22 → 0.2307 | 0.13 → 0.1363 | 0.25 → 0.2553 | 0.12 → 0.0840 | 0.28 → 0.2937 | 0.01762 |
+
+Settled prices (the flow test's band is 0.5–2.0 × these) and GDP:
+
+| Country | FOOD | ENERGY | GOODS | TECH | SERVICES | GDP |
+|---|---|---|---|---|---|---|
+| DORNE | 0.776 | 0.520 | 0.850 | 0.878 | 0.388 | 16.79 |
+| BRONTIA | 0.386 | 1.000 | 0.503 | 0.596 | 0.247 | 14.64 |
+| CERES | 0.332 | 1.000 | 1.411 | 0.752 | 0.353 | 10.19 |
+| FALKEN | 0.522 | 0.773 | 0.705 | 0.854 | 0.513 | 13.43 |
+| AURELIA | 1.529 | 1.000 | 1.315 | 0.655 | 0.191 | 9.51 |
+| EVERMERE | 0.936 | 1.000 | 1.079 | 0.363 | 0.270 | 9.57 |
+
+### B. Shock bite (D53)
+
+Test B, part 1: `energy_crunch`, status quo, no random shocks, seeds 1–10. Energy importers (ENERGY
+imports > exports at the settled state) are BRONTIA, CERES, AURELIA, EVERMERE. Stability lost from the
+end of turn 3 to the lowest point in turns 4–6, unemployment rise and largest move in annualized
+inflation, min–max over the 10 seeds:
+
+| Country | stability lost | unemployment rise (points) | inflation move (points) |
+|---|---|---|---|
+| DORNE (hit) | 13.4–20.4 | 4.0–9.6 | 4.7–7.7 |
+| BRONTIA | 18.4–24.6 | 0.4–4.7 | 5.1–9.7 |
+| CERES | 18.5–29.1 | 1.6–3.1 | 3.9–14.7 |
+| FALKEN | 12.8–19.9 | 0.0–0.7 | 2.7–7.8 |
+| AURELIA | 20.3–29.4 | 2.4–5.4 | 10.6–14.8 |
+| EVERMERE | 19.0–28.2 | 0.4–3.7 | 6.9–11.7 |
+
+Required: ≥ 2 importers lose ≥ 10, and ≥ 2 importers show unemployment +2 points or inflation moved by
+3 points. All 4 importers pass both, in every seed.
+
+Part 2: one aggressor sanctions all five others every turn and sets military spending to 0.4 of GDP
+(the action maximum), the others keep the status quo, random shocks on, 14 turns, seeds 1–10. Seeds
+with at least one stability-driven leader fall: DORNE 10, BRONTIA 9, CERES 10, FALKEN 10, AURELIA 10,
+EVERMERE 10. Almost always the aggressor's own leader falls (autarky crashes its employment and the
+military bill drives debt toward default); CERES, the food exporter, is the most common victim among
+the others.
+
+### Stability parameters: what was tried (20 seeds × 60 turns for the flow band)
+
+At k_m = 6 (pass 3) **B already held** with the new calibration: k_m did not block it. What failed was
+the flow CHECK: the status-quo minimum fell to **36.3** (FALKEN, seed 12, after two firm exits; seed 11
+dipped to 39.7 after a CERES FOOD firm exit caused a world food shortage and BRONTIA defaulted).
+Lowering k_m makes this worse, so the search went the other way:
+
+| k_m | energy cap | w_ref | k_pi | flow min stability | 2nd-largest importer drop, worst seed | aggressor: min seeds with a fall |
+|---|---|---|---|---|---|---|
+| 6 | 6 | 0.10 | 0.8 | 36.3 ✗ | 15.6 | 10 |
+| 5 | 6 | 0.10 | 0.8 | 32.1 ✗ | 16.2 | 10 |
+| 4 | 6 | 0.10 | 0.8 | 25.7 ✗ | 16.8 | 10 |
+| 3 | 6 | 0.10 | 0.8 | 10.1 ✗ | 17.3 | 10 |
+| 6 | 10 | 0.10 | 0.8 | 35.4 ✗ | 21.2 | 10 |
+| 7 | 6 | 0.10 | 0.8 | 39.2 ✗ | 14.9 | 5 |
+| 8 | 6 | 0.10 | 0.8 | 41.7 | 14.3 | 4 |
+| 6 | 6 | 0.08 | 0.8 | 39.6 ✗ | 15.4 | 10 |
+| 6 | 6 | 0.08 | 0.5 | 43.7 | 13.8 | 2 |
+| **7** | **10** | **0.08** | 0.8 | **41.9** | **20.0** | **9** |
+
+**Chosen: k_m = 7, max_energy_penalty = 10, w_ref = 0.08** (max_food_penalty stays 10, k_pi stays 0.8).
+It passes the flow band with the closest-to-spec k_m among the passing rows, gives the strongest
+shock bite and keeps aggressor falls robust (9–10 of 10 seeds for every seat).
+- **w_ref 0.10 → 0.08:** FALKEN's configured welfare share is 0.08, so with w_ref 0.10 it lost 2
+  stability every turn just for keeping its starting budget, and it was the minimum country in 5 of
+  the 6 worst seeds. 0.08 = the lowest starting welfare share: no country is penalized for its
+  configured status quo (open issue S1's suggested fix, done in yaml). Others gain +2/turn (+4 vs
+  their 0.12 budgets), which only lifts their resting level; the flow maximum is 75.7 < 90.
+- **Energy cap 6 → 10:** energy shortages now cost up to 10 points a turn, like food. This is what
+  makes the energy crunch bite (second-largest importer drop 15 → 20) without lowering k_m.
+- **Why k_m (7) still differs from the spec (1):** the status-quo economy is not quiet. Firm
+  exits and entries (FIRMS stream) cause short world food and energy shortages, deflation of 1–4%/yr
+  costs 2–5 points a turn through the inflation term, and debt-heavy countries can default in
+  status-quo play (BRONTIA, seed 11). With k_m = 1 the resting level of stability is around 20–45 and
+  the flow band (≥ 40) fails; every k_m ≤ 6 fails it now. The pull back to 70 must be strong enough to
+  absorb this background noise while a real shock (energy crunch) or a hostile policy still costs
+  15–30 points within 3 turns. Lowering k_m further would need a change to the stability equation
+  (e.g. a dead band on the inflation term), which is out of scope for yaml tuning.
+
+### Final CHECK (after burn-in, 60 turns, no shocks, status quo, 20 seeds)
+
+| Band | Required | Reached |
+|---|---|---|
+| GDP ÷ start | 0.5–2.0 | 0.737–1.021 |
+| prices ÷ settled | 0.5–2.0 | 0.583–1.384 |
+| unemployment | < 0.25 | max 0.148 |
+| stability | 40–90 | 41.9–75.7 |
+| treasuries | ≤ 2 × start GDP | max 0.12 × |
+
+### Every parameter that now differs from CLAUDE.md (before → after), replacing the pass 3 table
+
+| Parameter | CLAUDE.md | yaml now | Why |
+|---|---|---|---|
+| `stability.k_m` | 1.0 | **7.0** | Flow band with status-quo noise (above) |
+| `stability.w_ref` | 0.10 | **0.08** | D53, FALKEN's starting welfare share |
+| `stability.max_energy_penalty` | (D49: 6) | **10** | D53, energy shocks must bite |
+| `fiscal.bond_payout_weights` | (D37: cash) | **population** | D52, roster test A |
+| A table, consumption shares | §4.3 | tables above | D41/D52 calibration |
+| `food_floor` per country | — | tables above | D43 rule, recomputed |

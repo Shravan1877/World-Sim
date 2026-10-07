@@ -8,6 +8,9 @@ settled state after burn-in (D44, food floor off while searching):
   - the burn-in settles                                            (D44)
   - roster characters kept: DORNE is the largest net exporter of ENERGY, BRONTIA of GOODS, CERES of
     FOOD, AURELIA of SERVICES, EVERMERE of TECH
+  - Phase 4 roster-character test (tests/test_roster.py, D52): the same five are also the top exporter of
+    their good by gross export value, and every country's net exports are within +/-8% of GDP (hard
+    band, searched with a margin; the +/-3% D41 target stays as a soft term)
   - soft extras that help the flow test: settled prices in [0.6, 1.6], unemployment below 8%.
 Search: a (1+lambda) evolution strategy on log-multipliers with the 1/5 success rule. Every candidate
 is rounded to 4 decimals before it is evaluated, so the yaml holds exactly the values that were scored.
@@ -32,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from world.config import COUNTRIES, SECTORS, Config, load_config  # noqa: E402
-from world.engine.burn_in import run_burn_in, settled_streak  # noqa: E402
+from world.engine.burn_in import run_burn_in, settled_streak, settled_trade_values  # noqa: E402
 from world.rng import Stream, make_rng  # noqa: E402
 
 # CLAUDE.md §4.3 reference values (the +/-30% band is around these).
@@ -58,6 +61,8 @@ CHARACTER = {
     "EVERMERE": "TECH",
 }
 NX_TOL = 0.03
+NX_HARD = 0.08  # D52: tests/test_roster.py band
+NX_HARD_MARGIN = 0.065  # search target inside the hard band, so the test does not sit on the edge
 FLOOR_SHARE = 0.7  # D43
 N_A = A_REF.size
 
@@ -108,14 +113,7 @@ def make_cfg(base: Config, A: np.ndarray, shares: np.ndarray, floors: np.ndarray
 def measure(cfg: Config) -> dict:
     s, hist = run_burn_in(cfg, 0)
     b = cfg.world.burn_in
-    last = hist[-3:]
-    nx = np.zeros(6)
-    net_by_good = np.zeros((6, 5))
-    for k, cur in enumerate(last):
-        prev = hist[len(hist) - 3 + k - 1]
-        val = cur.trade * prev.price[None, :, :]  # traded at the price set before the step
-        net_by_good += val.sum(axis=0) - val.sum(axis=1)
-    net_by_good /= len(last)
+    export_value, net_by_good = settled_trade_values(hist)
     nx = net_by_good.sum(axis=1) / np.maximum(s.gdp, 1e-9)
     energy_short = s.shortage[:, 1] / np.maximum(s.demand[:, 1], 1e-9)
     return {
@@ -123,6 +121,7 @@ def measure(cfg: Config) -> dict:
         "turns": len(hist) - 1,
         "nx": nx,
         "net_by_good": net_by_good,
+        "export_value": export_value,
         "energy_short": energy_short,
         "price": (float(s.price.min()), float(s.price.max())),
         "u": s.unemployment,
@@ -140,6 +139,15 @@ def characters_kept(net_by_good: np.ndarray) -> list[str]:
     return bad
 
 
+def top_exporters_kept(export_value: np.ndarray) -> list[str]:
+    """D52: each roster country is the top exporter of its good by gross export value."""
+    return [
+        f"{c}/{good}"
+        for c, good in CHARACTER.items()
+        if np.argmax(export_value[:, SECTORS.index(good)]) != COUNTRIES.index(c)
+    ]
+
+
 def objective(x: np.ndarray) -> float:
     try:
         m = measure(make_cfg(load_config(), *decode(x)))
@@ -149,16 +157,25 @@ def objective(x: np.ndarray) -> float:
     j += 200 * np.sum(np.maximum(np.abs(m["nx"]) - NX_TOL * 0.8, 0.0)) + 5 * np.sum(m["nx"] ** 2)
     j += 50 * np.sum(m["energy_short"])
     j += 10 * len(characters_kept(m["net_by_good"]))
+    j += 1000 * np.sum(np.maximum(np.abs(m["nx"]) - NX_HARD_MARGIN, 0.0))  # D52 hard band
+    j += 30 * len(top_exporters_kept(m["export_value"]))  # D52
     lo, hi = m["price"]
     j += 5 * (max(0.6 - lo, 0) + max(hi - 1.6, 0))
     j += 10 * np.sum(np.maximum(m["u"] - 0.08, 0))
     return float(j)
 
 
-def search(generations: int, lam: int, workers: int) -> np.ndarray:
+def yaml_x(cfg: Config) -> np.ndarray:
+    """The search vector (log multipliers on the §4.3 reference) of the values now in yaml."""
+    A = np.array([[c.productivity[g] for g in SECTORS] for c in cfg.countries.countries])
+    sh = np.array([[c.consumption_shares[g] for g in SECTORS] for c in cfg.countries.countries])
+    return np.concatenate([np.log(A / A_REF).ravel(), np.log(sh / S_REF).ravel()])
+
+
+def search(generations: int, lam: int, workers: int, start: np.ndarray | None = None) -> np.ndarray:
     rng = make_rng(0, 0, Stream.BOT)  # calibration only; the engine never sees this stream
     dim = N_A + S_REF.size
-    best = np.zeros(dim)
+    best = np.zeros(dim) if start is None else start.copy()
     best_j = objective(best)
     sigma = 0.08
     with ProcessPoolExecutor(workers) as ex:
@@ -187,7 +204,7 @@ def write_yaml(A: np.ndarray, shares: np.ndarray, floors: np.ndarray) -> None:
         i = COUNTRIES.index(name)
         fmt = lambda v: "{" + ", ".join(f"{g}: {v[k]:.4f}" for k, g in enumerate(SECTORS)) + "}"  # noqa: E731
         sh = shares[i]  # already rounded by decode() (D47)
-        blk = re.sub(r"productivity: \{[^}]*\}", f"productivity: {fmt(A[i])}", blk)
+        blk = re.sub(r"productivity: \{[^}]*\}[^\n]*", f"productivity: {fmt(A[i])}", blk)
         blk = re.sub(r"\n    consumption_shares: \{[^}]*\}[^\n]*", "", blk)
         blk = re.sub(
             r"(\n    productivity: [^\n]*)",
@@ -208,11 +225,18 @@ def main() -> None:
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--save-x", help="save the best search vector (.npy)")
     ap.add_argument("--load-x", help="skip the search and use this saved vector (.npy)")
+    ap.add_argument("--from-yaml", action="store_true", help="start the search from the values now in yaml")
+    ap.add_argument("--start-x", help="start the search from this saved vector (.npy)")
     args = ap.parse_args()
 
     base = load_config()
     print("reference (CLAUDE.md §4.3) objective:", objective(np.zeros(N_A + S_REF.size)))
-    x = np.load(args.load_x) if args.load_x else search(args.generations, args.lam, args.workers)
+    start = yaml_x(base) if args.from_yaml else None
+    if args.start_x:
+        start = np.load(args.start_x)
+    if start is not None:
+        print("start objective:", objective(start))
+    x = np.load(args.load_x) if args.load_x else search(args.generations, args.lam, args.workers, start)
     if args.save_x:
         np.save(args.save_x, x)
     A, shares = decode(x)
@@ -223,6 +247,7 @@ def main() -> None:
     print("net exports % GDP:", 100 * m["nx"])
     print("energy shortage:", m["energy_short"], " prices:", m["price"], " u:", m["u"])
     print("characters broken:", characters_kept(m["net_by_good"]) or "none")
+    print("top exporters broken (D52):", top_exporters_kept(m["export_value"]) or "none")
     print("A / reference:\n", A / A_REF)
     print("shares / reference:\n", shares / S_REF)
     print("A:\n", A, "\nshares:\n", shares)

@@ -125,6 +125,7 @@ class FiscalCfg(Strict):
     gdp_floor_share_of_start: Probability
     premium_cap: NonNegative
     treasury_buffer_quarters: NonNegative
+    bond_payout_weights: Literal["population", "cash"] = "population"  # D52
 
 
 class MonetaryCfg(Strict):

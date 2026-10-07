@@ -45,6 +45,19 @@ def settled_streak(history: list[WorldState], tol: float, window: int = 4) -> in
     return n
 
 
+def settled_trade_values(history: list[WorldState], turns: int = 3) -> tuple[np.ndarray, np.ndarray]:
+    """(export value, net export value), each (6, 5) country x good, averaged over the last `turns`
+    burn-in turns. Each turn's flows are valued at the exporter's price set before that step (the
+    price they traded at). Used by scripts/calibrate_balance.py (D41) and tests/test_roster.py (D52)."""
+    export_value = np.zeros_like(history[-1].price)
+    net = np.zeros_like(history[-1].price)
+    for prev, cur in zip(history[-turns - 1 : -1], history[-turns:], strict=True):
+        val = cur.trade * prev.price[None, :, :]  # (importer, exporter, good)
+        export_value += val.sum(axis=0)
+        net += val.sum(axis=0) - val.sum(axis=1)
+    return export_value / turns, net / turns
+
+
 def run_burn_in(cfg: Config, seed: int = 0) -> tuple[WorldState, list[WorldState]]:
     """Returns (settled state, the states after each burn-in turn, for calibration reports).
 

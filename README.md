@@ -31,3 +31,9 @@ uv run ruff check
   `docs/calibration.md` (pass 3) and `docs/open_issues.md`.
 - **Phase 3 (firms, shocks, trust): done.** The 14-turn × 20-seed run with shocks and the
   energy_crunch scenario passes from the settled state.
+- **Phase 4 (in progress): calibration step (item 8) A and B done.** Required tests
+  `tests/test_roster.py` (each roster country is the top exporter of its good; net exports within
+  ±8% of GDP) and `tests/test_shock_bite.py` (energy_crunch costs importers ≥ 10 stability; an
+  aggressor bot can topple a leader) pass. Changes: bond-market payout by population (D52), re-run
+  calibration, k_m 7 / w_ref 0.08 / energy cap 10 (D53); see `docs/calibration.md` pass 4.
+  Items 1–7 (actions, validator, treaties, special powers, bots) are not built yet.

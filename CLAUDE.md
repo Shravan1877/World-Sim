@@ -466,8 +466,9 @@ GDP, floored at 0). The floor share, window and cap are config values (`world.ya
 **Money loop (D37),** every turn after borrowing and the default check, both logged ledger transfers:
 (b) treasury cash above `0.5 ×` this turn's outlays repays debt (government → bond_market); if debt is
 0, the rest goes to the country's households as a lump sum. Then (a) any positive `bond_market`
-balance is paid to households of all countries pro rata to their cash `H` (by population if all
-`H` = 0); the bond market may stay negative (it is the money issuer). Both payments count as household
+balance is paid to households of all countries pro rata to their **population** (D52; D37 used cash
+`H`, still available as `world.yaml: fiscal.bond_payout_weights: cash`); the bond market may stay
+negative (it is the money issuer). Both payments count as household
 transfers in `Y_disp`. Buffer in `world.yaml: fiscal.treasury_buffer_quarters`.
 **Default:** if `debt / (4·GDP_ref) > 1.5` (param), then: debt × 0.5 (haircut, paid by the bond
 market account), stability −20, `default_premium += 0.05` for 8 turns, and while in default
@@ -547,10 +548,11 @@ All draws use the FIRMS stream (§8).
 Stab' = clip(Stab + ΔStab, 0, 100)
 ```
 Defaults: `k_u=1.0, k_π=0.8, k_f=3.0, k_e=1.5, k_w=1.0, w_ref=0.10, k_m=1.0`.
-**D49:** the food-shortage term is at most 10 points and the energy-shortage term at most 6 points
-per turn (one bad turn must not wipe out stability). **Calibrated (PASS 3):** `k_m = 6.0` in
-`world.yaml`: with `k_m = 1` small permanent penalties (inflation off target, FALKEN's low welfare)
-pull stability toward 20–45; see `docs/calibration.md`.
+**D49:** the food-shortage term is at most 10 points and the energy-shortage term at most 10 points
+per turn (D53; was 6), so one bad turn cannot wipe out stability. **Calibrated (pass 4, D53):**
+`k_m = 7.0` and `w_ref = 0.08` in `world.yaml`: with `k_m = 1` status-quo background noise (firm
+exits, mild deflation, an occasional default) pulls stability toward 20–45; `w_ref` equals FALKEN's
+starting welfare share. Required tests: `tests/test_shock_bite.py`; see `docs/calibration.md`.
 Below 30: unrest with probability `(30 − Stab)/60` (SHOCK stream) → output −5% next turn,
 Stab −5. Below 15: the leader falls with probability 0.5 per turn (FALKEN: "coup";
 CERES: probability 0.8, "election loss").
@@ -1199,6 +1201,8 @@ Video rule: record replays of finished runs. Never run live.
 | D49 | Shortage penalties capped: food term ≤ 10, energy term ≤ 6 stability points per turn (§6.11) | Locked (owner decision 2026-10-07, PASS 2) |
 | D50 | Price rule may use an exponential average of excess demand (weight in yaml). Tried at 0.5 in PASS 2 (burn-in stopped settling, prices fell to 0.29× settled); PASS 3 sets the weight to 1.0 = off (§6.5) | Locked mechanism; **off** after PASS 3 tuning |
 | D51 | After burn-in, stocks may be reset to N turns of planned use (yaml). Tried at 3 in PASS 2 (prices crashed, unemployment 26%); PASS 3 sets it to null = off (§6.15) | Locked mechanism; **off** after PASS 3 tuning |
+| D52 | Roster-character test required (`tests/test_roster.py`): at the settled state DORNE/CERES/BRONTIA/EVERMERE/AURELIA are the top exporters by value of ENERGY/FOOD/GOODS/TECH/SERVICES, and every net-export balance is within ±8% of GDP. Yaml alone could not get DORNE inside ±8% (−8.2% with its A and shares at the ±30% edges); the blocker was D37's payout key (bond-market surplus pro rata to cash sent ~30% of world interest to cash-rich DORNE). Smallest change: pay it pro rata to population (`fiscal.bond_payout_weights`, one line in `recycle.py`), then re-run the D41 search (now also scoring test A). Result −2.2% to +3.1% (§6.7) | Decided by assistant under the owner's 2026-10-07 instruction ("pick the smallest change"); change if unwanted |
+| D53 | Shock-bite test required (`tests/test_shock_bite.py`): energy_crunch costs ≥ 2 energy importers ≥ 10 stability within 3 turns with visible u/π moves; a sanction-everyone + max-military aggressor topples a leader in some seed for every seat. k_m = 6 did not block it; the flow band did (status-quo min 36.3 after D52). Final yaml: `k_m` 7, `max_energy_penalty` 10, `w_ref` 0.08 (spec 0.10, = FALKEN's starting welfare share). Flow min 41.9 (§6.11) | Decided by assistant under the owner's 2026-10-07 instruction; values in `docs/calibration.md` pass 4 |
 
 ---
 

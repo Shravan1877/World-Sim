@@ -258,6 +258,20 @@ Build:
 8. Calibration: run the §6.15 checks, tune ONLY yaml parameters, and write docs/calibration.md
    (what you changed, why, before/after numbers, plots saved to reports/figures/).
    Also check that no country dominates the CooperativeBot baseline by construction.
+   Two REQUIRED tests are part of this step (owner, 2026-10-07; done ahead of the rest of Phase 4,
+   D52/D53):
+   A. tests/test_roster.py, at the settled state: DORNE is the top ENERGY exporter by export value,
+      CERES top FOOD, BRONTIA top GOODS, EVERMERE top TECH, AURELIA top SERVICES, and every country's
+      net exports are within +/-8% of GDP. Fix failures with yaml tuning (A table and consumption
+      shares, each within +/-30% of CLAUDE.md §4.3); if that is not enough, name the equation or
+      design choice that blocks it and pick the smallest change. Log in docs/calibration.md.
+   B. tests/test_shock_bite.py: with energy_crunch (turn 4, energy_disaster on DORNE) and status-quo
+      bots, at least two energy-importing countries lose at least 10 stability points within 3 turns
+      of the shock, and unemployment or inflation visibly moves. A bot that sanctions everyone and
+      sets military spending to the maximum can trigger a leader fall in at least one country within
+      14 turns in some seeds. Tune k_m and the shortage-penalty caps until both hold while the
+      baseline flow test still passes (stability 40 to 90); document the final values and why k_m
+      differs from the spec.
 
 Tests: validator (every action valid and invalid, wrong-country powers, duplicates, contradictions,
 default-spending rule, treaty-id rules, commitments); treaties (each kind's life cycle and each

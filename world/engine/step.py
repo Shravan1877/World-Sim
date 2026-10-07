@@ -395,6 +395,7 @@ def _step(
         outlays=outlays,
         buffer_quarters=w.fiscal.treasury_buffer_quarters,
         population=state.population,
+        weights=w.fiscal.bond_payout_weights,
     )
     led = rc.ledger
     y_disp = fiscal.disposable_income(

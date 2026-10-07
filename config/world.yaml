@@ -87,6 +87,9 @@ fiscal:
   premium_cap: 0.20                    # annual, total premium (debt premium + default premium)
   # D37: treasury cash above this many quarters of outlays repays debt (or goes to households)
   treasury_buffer_quarters: 0.5
+  # D52: the D37 bond-market surplus goes to households pro rata to population (D37 used cash H;
+  # "cash" restores that). With cash weights DORNE's net exports were -15.8% of GDP.
+  bond_payout_weights: population
 
 # --- §6.8: monetary policy ------------------------------------------------
 monetary:
@@ -129,10 +132,10 @@ stability:
   k_f: 3.0
   k_e: 1.5
   max_food_penalty: 10.0               # D49: food-shortage term at most 10 points per turn
-  max_energy_penalty: 6.0              # D49: energy-shortage term at most 6 points per turn
+  max_energy_penalty: 10.0             # D49 cap, raised 6 -> 10 by D53 (energy shocks must bite; docs/calibration.md pass 4)
   k_w: 1.0
-  w_ref: 0.10
-  k_m: 6.0                             # calibrated, spec 1.0 (PASS 3, docs/calibration.md)
+  w_ref: 0.08                          # spec 0.10; D53: = FALKEN's starting welfare share, so no country loses stability for its configured budget
+  k_m: 7.0                             # calibrated, spec 1.0 (PASS 3: 6; D53 pass 4: 7; docs/calibration.md)
   normal_level: 70                     # slow pull back to this level
   mean_reversion_scale: 10             # k_m * (70 - Stab) / 10
   min: 0

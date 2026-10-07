@@ -8,19 +8,20 @@ from world.engine.stability import stability_change, unrest_and_leader_fall, upd
 from world.rng import RngBundle
 
 P = load_config().world.stability
-# The §6.11 formula checks use the CLAUDE.md spec values: k_m = 1 and no D49 caps.
-# (The yaml calibrates k_m and caps the shortage terms; see test_d49_caps_and_calibrated_pull.)
-P_SPEC = P.model_copy(update={"k_m": 1.0, "max_food_penalty": 1e9, "max_energy_penalty": 1e9})
+# The §6.11 formula checks use the CLAUDE.md spec values: k_m = 1, w_ref = 0.10 and no D49 caps.
+# (The yaml calibrates k_m and w_ref and caps the shortage terms; see test_d49_caps_and_calibrated_pull.)
+P_SPEC = P.model_copy(update={"k_m": 1.0, "w_ref": 0.10, "max_food_penalty": 1e9, "max_energy_penalty": 1e9})
 
 
 def _delta(**over) -> float:
+    p = over.get("p", P_SPEC)
     args = dict(
         stability=np.array([70.0]),
         u=np.array([0.05]),
         pi_annual=np.array([0.02]),
         food_shortage_frac=np.zeros(1),
         energy_shortage_frac=np.zeros(1),
-        welfare_to_gdp=np.array([0.10]),
+        welfare_to_gdp=np.array([p.w_ref]),  # neutral welfare term
         sanction_cost=np.zeros(1),
         shock_effects=np.zeros(1),
         u_n=0.05,
@@ -46,10 +47,10 @@ def test_each_term() -> None:
 
 
 def test_d49_caps_and_calibrated_pull() -> None:
-    """D49: food term at most 10, energy at most 6 points per turn; k_m from yaml (calibrated)."""
+    """D49 caps (D53 values: food 10, energy 10 points per turn); k_m from yaml (calibrated)."""
     assert _delta(food_shortage_frac=np.array([0.5]), p=P) == pytest.approx(-P.max_food_penalty)
     assert _delta(energy_shortage_frac=np.array([0.5]), p=P) == pytest.approx(-P.max_energy_penalty)
-    assert (P.max_food_penalty, P.max_energy_penalty) == (10.0, 6.0)
+    assert (P.max_food_penalty, P.max_energy_penalty) == (10.0, 10.0)
     assert _delta(food_shortage_frac=np.array([0.02]), p=P) == pytest.approx(-6.0)  # below the cap
     assert _delta(stability=np.array([50.0]), p=P) == pytest.approx(P.k_m * 2.0)
 
