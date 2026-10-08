@@ -40,7 +40,7 @@ def main(argv=None) -> int:
         for _, k in calls[calls.country == c].iterrows():
             print(f"    call: {k.provider}/{k.model_id} method={k.method} attempt={k.attempt} "
                   f"tokens in/out/thinking={k.tokens_in}/{k.tokens_out}/{k.tokens_reasoning} "
-                  f"latency={k.latency_s:.1f}s cached={bool(k.cached)}{' error: ' + str(k.error)[:120] if k.error else ''}")  # fmt: skip
+                  f"latency={k.latency_s:.1f}s cached={bool(k.cached)}{' error: ' + str(k.error)[:120] if isinstance(k.error, str) and k.error else ''}")  # fmt: skip
         if d.situation_read:
             print(f"  situation read : {d.situation_read}")
         print(f"  public         : {d.public_statement}")
