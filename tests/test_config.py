@@ -60,10 +60,11 @@ def test_spot_values_match_claude_md() -> None:
 
 def test_model_runnable_flags() -> None:
     models = load_config().models
-    assert models.models["m8b"].runnable_for_experiments
-    assert models.models["m14b"].runnable_for_experiments
-    assert not models.models["m3b"].runnable_for_experiments  # untested
-    assert not models.models["g31"].runnable_for_experiments  # unverified
+    # statuses after the Phase 6 probe (2026-10-08, docs/quota_plan.md)
+    for key in ("m8b", "g31", "g35"):
+        assert models.models[key].runnable_for_experiments, key
+    for key in ("m3b", "m14b"):  # valid full TurnDecision not proven yet
+        assert not models.models[key].runnable_for_experiments, key
     assert models.concurrency("m14b") == models.defaults.max_concurrency == 1
     assert models.concurrency("m3b") == 2
 

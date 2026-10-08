@@ -36,7 +36,7 @@ from world.engine import trade as trade_mod
 from world.engine import treaties as treaties_mod
 from world.engine.policy import PolicyEffects
 from world.ledger import Account, Ledger, Transfer, all_accounts
-from world.policies.base import DecisionResult
+from world.policies.base import CallLog, DecisionResult
 
 
 def _classes(*modules) -> dict[str, type]:
@@ -52,6 +52,7 @@ _REGISTRY: dict[str, type] = {
     **_classes(state_mod, history_mod, shocks_mod, treaties_mod, step_mod, trade_mod, actions_mod),
     "PolicyEffects": PolicyEffects,
     "DecisionResult": DecisionResult,
+    "CallLog": CallLog,
     "Account": Account,
     "Transfer": Transfer,
 }

@@ -41,6 +41,7 @@ class SeatRecord:
     hostile: tuple[tuple[str, str], ...]  # (kind, victim) from this seat's accepted actions
     public_statement: str = ""
     degraded: bool = False  # the policy was replaced by StatusQuoBot after repeated parse failures
+    action_notes: tuple[str, ...] = ()  # per accepted action: "" or the unused fields ignored (D69)
 
 
 @dataclass(frozen=True)

@@ -154,7 +154,6 @@ def test_valid_action_is_accepted(country: str, action: ActionIn) -> None:
 INVALID = [
     ("DORNE", A(type="set_tax", rate=0.7), "rate"),
     ("DORNE", A(type="set_tax"), "missing rate"),
-    ("DORNE", A(type="set_tax", rate=0.2, target="CERES"), "not used"),
     ("DORNE", A(type="set_spending", welfare=0.3, military=0.3, subsidy=0.1), "> 0.6"),
     ("DORNE", A(type="set_spending", welfare=0.5, military=0.0, subsidy=0.0), "welfare"),
     ("DORNE", A(type="set_spending", welfare=0.1, military=0.1), "missing subsidy"),
@@ -202,7 +201,6 @@ INVALID = [
     ("DORNE", A(type="set_energy_export_levy", rate=0.6), "rate"),
     ("CERES", A(type="set_food_export_ban", target="CERES", on=True), "yourself"),
     ("AURELIA", A(type="set_policy_rate", rate=0.2), "rate"),
-    ("EVERMERE", A(type="wait", rate=0.1), "not used"),
 ]
 
 
@@ -483,3 +481,21 @@ def test_convert_never_raises() -> None:
     for a in [A(type=t) for t in ("set_tax", "propose_treaty", "set_tariff", "wait", "set_policy_rate")]:
         out = convert(a)
         assert isinstance(out, str) or out.type == a.type
+
+
+@pytest.mark.parametrize(
+    ("country", "action", "fields"),
+    [
+        ("DORNE", A(type="set_tax", rate=0.2, target="CERES"), "target"),
+        ("EVERMERE", A(type="wait", rate=0.1), "rate"),
+        ("DORNE", A(type="set_spending", welfare=0.15, military=0.08, subsidy=0.05, target="ALL",
+                    sector="ENERGY", rate=0.0, on=False, kind="supply_contract", duration=0, treaty_id="",
+                    terms=""), "duration, kind, on, rate, sector, target, terms, treaty_id"),
+    ],
+)  # fmt: skip
+def test_unused_fields_are_ignored_and_noted(country: str, action: ActionIn, fields: str) -> None:
+    """D69: a field the action type does not use is dropped (small models fill every field of the flat
+    wire object); the action is accepted and the ignored fields are noted."""
+    vr = check(country, action)
+    assert len(vr.accepted) == 1 and not vr.rejected
+    assert vr.notes == (f"ignored unused fields: {fields}",)

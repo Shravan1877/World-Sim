@@ -74,6 +74,7 @@ class GraphState(TypedDict, total=False):
     turn_seats: list  # encoded SeatRecords of this turn so far
     turn_actions: list  # [[country, action text], ...] accepted so far this turn (readable view)
     turn_statements: list  # [[country, public statement], ...] this turn so far
+    turn_results: dict  # country -> encoded DecisionResult (model calls, for llm_calls)
     effects: dict  # encoded PolicyEffects (what step() needs from this turn's actions)
     pending: dict | None  # encoded DecisionResult of the seat that just decided
     last_log: dict | None  # encoded TurnLog between resolve and record
@@ -90,8 +91,15 @@ class GraphState(TypedDict, total=False):
 PolicyFactory = Callable[[str, Config], LeaderPolicy]
 
 
-def make_policy(name: str, cfg: Config) -> LeaderPolicy:
-    """Policy by name. Phase 5: the scripted bots only (LLM policies arrive in Phase 6)."""
+def make_policy(name: str, cfg: Config, router=None, country: str | None = None) -> LeaderPolicy:
+    """Policy by name: a bot name, or 'lite:<model key>' for a lite-mode LLM leader (needs `router`,
+    world/llm/router.py, so every seat of one model key shares one limiter)."""
+    if name.startswith("lite:"):
+        from world.policies.lite import LitePolicy
+
+        if router is None or country is None:
+            raise ValueError(f"{name}: an LLM policy needs a router and its country")
+        return LitePolicy(router.client(name.split(":", 1)[1]), country, cfg)
     return make_bot(name, cfg)
 
 
@@ -119,6 +127,7 @@ def open_checkpointer(path: str | Path = CHECKPOINTS_DB) -> SqliteSaver:
     if str(path) != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), check_same_thread=False)
+    conn.execute("PRAGMA auto_vacuum = INCREMENTAL")  # takes effect on a new file; lets pruning shrink it
     return SqliteSaver(conn, serde=JsonPlusSerializer(allowed_msgpack_modules=None))
 
 
@@ -167,6 +176,7 @@ def build_graph(
             "turn_seats": [],
             "turn_actions": [],
             "turn_statements": [],
+            "turn_results": {},
             "effects": encode(PolicyEffects()),
             "pending": None,
         }
@@ -205,6 +215,7 @@ def build_graph(
             "turn_seats": [*st["turn_seats"], encode(r)],
             "turn_actions": [*st["turn_actions"], *([country, a.model_dump_json()] for a in r.accepted)],
             "turn_statements": [*st["turn_statements"], [country, r.public_statement]],
+            "turn_results": {**st["turn_results"], country: st["pending"]},
             "streak": {**st["streak"], country: so.streak},
             "degraded_seats": degraded,
             "status": status,
@@ -250,12 +261,14 @@ def build_graph(
         if storage is not None:
             storage.write_turn(
                 run_id, rec, s, log, decode(st["start_world"]), cfg,
-                shock_events=(decode(e) for e in st["shock_events"]),
+                shock_events=(decode(e) for e in st["shock_events"]), transfers=s.ledger.log,
+                results={c: decode(v) for c, v in st["turn_results"].items()},
             )  # fmt: skip
             storage.set_status(
                 run_id, status, degraded_seats=st["degraded_seats"], error=st["error"], ended=finished
             )
         return {
+            "world": encode(compact(s)),  # D68: the turn's transfers are in the database now
             "recent": [*st["recent"], encode(rec)][-HISTORY_KEPT:],
             "last_log": None,
             "status": status,
@@ -285,6 +298,14 @@ def build_graph(
 # ------------------------------------------------------------------------------ run helpers
 
 
+def compact(s: WorldState) -> WorldState:
+    """D68: the state with its ledger rebased to the current balances and an empty transfer log.
+    Same state_hash (the hash covers balances only); step() reads only the current turn's transfers."""
+    out = s.copy()
+    out.ledger = s.ledger.rebased()
+    return out
+
+
 def initial_state(
     run_id: str,
     seed: int,
@@ -300,8 +321,8 @@ def initial_state(
     """The graph input for a new run. The horizon is drawn here from the HORIZON stream (§8) unless a
     fixed `turns` is given (tests, calibration)."""
     return GraphState(
-        world=encode(start),
-        start_world=encode(start),
+        world=encode(compact(start)),
+        start_world=encode(compact(start)),
         turn=start.turn,
         horizon=turns if turns is not None else draw_horizon(seed, cfg),
         order=[],
@@ -311,6 +332,7 @@ def initial_state(
         turn_seats=[],
         turn_actions=[],
         turn_statements=[],
+        turn_results={},
         effects=encode(PolicyEffects()),
         pending=None,
         last_log=None,
@@ -350,7 +372,52 @@ def drive(
             snap = app.get_state(config)
             if not snap.next or snap.values["turn"] >= stop_after_turn:
                 break
-    return app.get_state(config).values
+    snap = app.get_state(config)
+    if not snap.next and isinstance(app.checkpointer, SqliteSaver):
+        prune_checkpoints(app, run_id)
+    return snap.values
+
+
+def prune_checkpoints(app, run_id: str) -> int:
+    """D68: after a run has finished, keep only the turn-boundary checkpoints (the input checkpoint and
+    the one after each turn is recorded: where fork_snapshot and resume look) and the final one; delete
+    the per-node checkpoints in between and relink parents. Returns the number deleted."""
+    saver: SqliteSaver = app.checkpointer
+    keep: list[str] = []
+    drop: list[str] = []
+    for snap in app.get_state_history(thread_config(run_id)):  # newest first
+        cid = snap.config["configurable"]["checkpoint_id"]
+        (keep if not keep or snap.next == ("turn_start",) else drop).append(cid)
+    if not drop:
+        return 0
+    with saver.lock, saver.conn:
+        q = ",".join("?" * len(drop))
+        for table in ("checkpoints", "writes"):
+            saver.conn.execute(
+                f"DELETE FROM {table} WHERE thread_id=? AND checkpoint_id IN ({q})", (run_id, *drop)
+            )
+        ordered = sorted(keep)  # checkpoint ids sort in time order
+        for parent, child in zip([None, *ordered[:-1]], ordered, strict=True):
+            saver.conn.execute(
+                "UPDATE checkpoints SET parent_checkpoint_id=? WHERE thread_id=? AND checkpoint_id=?",
+                (parent, run_id, child),
+            )
+    with saver.lock:
+        saver.conn.execute("PRAGMA incremental_vacuum").fetchall()  # each row = one freed page
+    return len(drop)
+
+
+def checkpoint_bytes(app, run_id: str) -> int:
+    """Bytes stored for one thread in the checkpoint database (checkpoints + pending writes)."""
+    conn = app.checkpointer.conn
+    a = conn.execute(
+        "SELECT COALESCE(SUM(LENGTH(checkpoint) + LENGTH(metadata)), 0) FROM checkpoints WHERE thread_id=?",
+        (run_id,),
+    ).fetchone()[0]
+    b = conn.execute(
+        "SELECT COALESCE(SUM(LENGTH(value)), 0) FROM writes WHERE thread_id=?", (run_id,)
+    ).fetchone()[0]
+    return int(a + b)
 
 
 def fork_snapshot(app, run_id: str, fork_turn: int):

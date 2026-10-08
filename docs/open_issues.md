@@ -1,7 +1,30 @@
-# Open issues (engine and orchestration, Phases 2–5)
+# Open issues (engine, orchestration and agents, Phases 2–6)
 
 Last updated 2026-10-08. Earlier open items were only in the Phase 3 chat summary; this file now
 keeps them in the repo.
+
+## Update after Phase 6 (2026-10-08): lite LLM agents
+
+- **P5-1 resolved (D68):** a finished 14-turn bot game keeps 15 checkpoints, 1.8 MB (file 1.9 MB);
+  `tests/test_graph_bots.py::test_finished_run_keeps_turn_boundary_checkpoints_under_3mb`.
+- **P6-1, probe data lost for m3b / m14b (my logging bug).** The first full probe run only wrote its
+  results at the end and was stopped when m14b's 60 s timeouts started eating the 20-call probe
+  budget; per-method validity for m3b and m14b was not recorded (the quota ledger kept every attempt:
+  m3b answered all 3 methods in ~4 s, 3.5k–4.6k tokens; m14b timed out 7 of 9 attempts, one
+  function_calling answer after ~41 s). Both stay `unverified` and out of experiments. Fix in place:
+  the probe saves after every call and does no hidden retries; timeout is now 120 s. **Needs the
+  owner's OK for a re-probe:** m3b × 3 methods + m14b × 3 methods = 6 calls (≤ 12 with one retry).
+- **P6-2, D69 changes a locked decision (D54).** Unused action fields are now ignored and noted
+  instead of rejecting the action (m8b filled every field: 36/36 rejected before, 33/36 accepted
+  after). Please confirm or revert.
+- **P6-3, g31/g35 shared or separate daily quota: not confirmed.** Google's docs say limits are per
+  project and vary by model; success responses carry no rate-limit headers, and no 429 happened.
+  They stay in separate `quota_group`s. To confirm, open AI Studio → Usage / Rate limits and check
+  whether gemini-3.1-flash-lite and gemini-3.5-flash-lite show separate "requests per day" rows
+  (separate) or one combined counter (shared: give both the same `quota_group`). The first daily-cap
+  429 will also show it: a quotaId ending in `PerProjectPerModel` means separate.
+- **P6-4, latency:** m8b answers in 15–24 s per full decision (not 2.6 s as with a tiny object), so a
+  6-LLM 12-turn run takes ~25–30 min on m8b; the limiter is far from binding on Mistral.
 
 ## Update after Phase 5 (2026-10-08): LangGraph loop
 

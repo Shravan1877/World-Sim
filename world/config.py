@@ -677,6 +677,13 @@ class ModelCfg(Strict):
     quota_group: str | None = None
     thinking: str | None = None
     structured_method: Literal["json_schema", "function_calling", "json_mode", "TODO_VERIFY"] | None = None
+    tokens_per_call_measured: Annotated[int, Field(ge=1)] | None = (
+        None  # prompt + completion, mean of live calls
+    )
+    tokens_in_measured: Annotated[int, Field(ge=0)] | None = None
+    tokens_out_measured: Annotated[int, Field(ge=0)] | None = None
+    tokens_reasoning_measured: Annotated[int, Field(ge=0)] | None = None
+    probe: str | None = None  # what the Phase 6 probe found (free text)
 
     @model_validator(mode="after")
     def _latency(self) -> ModelCfg:

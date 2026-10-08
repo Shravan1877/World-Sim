@@ -110,6 +110,11 @@ class Ledger:
         new.log = list(self.log)
         return new
 
+    def rebased(self) -> Ledger:
+        """The same balances as a new ledger that opens at them, with an empty log (D68: the graph state
+        keeps balances only; each turn's transfers go to the experiment database)."""
+        return Ledger(dict(self.balances))
+
     def transfer(self, src: Account, dst: Account, amount: float, reason: str) -> None:
         """Move `amount` credits from src to dst. Amount must be finite and >= 0."""
         amount = float(amount)

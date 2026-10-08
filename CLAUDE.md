@@ -858,11 +858,11 @@ START → turn_start (shocks, order) → leader (slot_index) → validate_apply
 
 | Key | Provider and model id | Published limits (what we plan against) | Status |
 |---|---|---|---|
-| `m3b` | Mistral `ministral-3b-2512` | 1,300,000 tokens/min, 12.5 requests/s (console table 2026-10-05) | Listed on the key. Chat call **not yet tested** |
-| `m8b` | Mistral `ministral-8b-2512` | 625,000 tokens/min, 188 requests/min (3.13 rps) | **Verified live** 2026-10-06: valid JSON, ~2.6 s/call, response headers match the table |
-| `m14b` | Mistral `ministral-14b-2512` | 937,500 tokens/min, **30 requests/min (0.5 rps)** | **Verified live** 2026-10-06: valid JSON, ~3.2 s/call, headers match the table |
-| `g31` | Google `gemini-3.1-flash-lite` | **15 requests/min, 250,000 tokens/min, 500 requests/day** (owner read from AI Studio 2026-10-06) | Model id given by the owner from AI Studio (2026-10-06); the Phase 6 probe confirms it works. Not yet called |
-| `g35` | Google `gemini-3.5-flash-lite` | same as `g31` | same as `g31` |
+| `m3b` | Mistral `ministral-3b-2512` | 1,300,000 tokens/min, 12.5 requests/s (console table 2026-10-05) | **Unverified** (probe 2026-10-08): serves chat (~4 s, 3.5k–4.6k tokens) but full-TurnDecision validity was not recorded; re-probe pending (docs/quota_plan.md) |
+| `m8b` | Mistral `ministral-8b-2512` | 625,000 tokens/min, 188 requests/min (3.13 rps) | **Verified** 2026-10-08: 42 full decisions, 0 parse failures, json_schema, 3,652 in + 1,316 out tokens, 16 s/call; headers match the table |
+| `m14b` | Mistral `ministral-14b-2512` | 937,500 tokens/min, **30 requests/min (0.5 rps)** | **Unverified** 2026-10-08: full decision took ~41 s or timed out at 60 s (7 of 9 attempts); timeout now 120 s; re-probe pending |
+| `g31` | Google `gemini-3.1-flash-lite` | **15 requests/min, 250,000 tokens/min, 500 requests/day** (owner read from AI Studio 2026-10-06) | **Verified** 2026-10-08: id listed by `models.list`, valid full decision (json_schema), 0 thinking tokens at `thinking_level: minimal`, ~5 s |
+| `g35` | Google `gemini-3.5-flash-lite` | same as `g31` | **Verified** 2026-10-08: 44 full decisions, 0 parse failures (3 retries), json_schema, 3,103 in + 691 out tokens, 0 thinking, 16.6 s/call |
 
 Plus a Mistral monthly cap of 1 billion tokens (help article; not seen in headers). Gemini's daily
 quota resets at midnight Pacific: **12:30 PM IST until 1 Nov 2026, 1:30 PM IST after**. Whether the
@@ -893,10 +893,10 @@ every limit) and 79 calls per run (12 turns × 6 seats + 10% retries) at the pla
 
 | Key | Min spacing between calls | Effective pace | One run | Binding limit | Daily capacity |
 |---|---|---|---|---|---|
-| `m3b` | 0.23 s | ~40 calls/min (speed-bound, latency assumed 1.5 s) | ~2 min | speed | no daily cap known |
-| `m8b` | 0.48 s | ~23 calls/min | ~3.4 min | speed | no daily cap known |
-| `m14b` | 2.5 s | ~19 calls/min (limit is 24 at 80%) | ~4.2 min | speed and 30 req/min | no daily cap known |
-| `g31`, `g35` | 5.0 s | 12 calls/min (limit is 12 at 80%) | ~6.6 min (latency assumed 2.5 s) | **15 req/min, then 500/day** | 400 calls/day (80%) ≈ **5 runs/day each** |
+| `m3b` | 0.23 s | ~15 calls/min (speed-bound, ~4 s measured in the probe) | ~5 min | speed | no daily cap known |
+| `m8b` | 0.48 s | ~3.7 calls/min (16 s measured) | ~21 min | speed | no daily cap known |
+| `m14b` | 2.5 s | ~1.5 calls/min (~41 s measured, unverified) | ~54 min | speed | no daily cap known |
+| `g31`, `g35` | 5.0 s | g31 ~12/min (~5 s), g35 ~3.6/min (16.6 s measured) | g31 ~7 min, g35 ~22 min | **500/day** | 400 calls/day (80%) ≈ **5 runs/day each** |
 
 At these paces every model stays at or below 80% of its request limit and well under its token
 limit (e.g. m14b ≈ 75K of 937K tokens/min; Gemini ≈ 48K of 250K tokens/min). The 3b and Gemini
@@ -979,10 +979,11 @@ for 5 minutes, then recover. Rules for running it:
 shorter text caps in `TurnDecision` → shrink `max_output_tokens` → horizon 8–12 turns → 8 seeds
 instead of 10 (minimum exact p = 0.0078) → drop `E2b`. Never drop E0 (it costs no quota).
 
-**Still unverified (the Phase 6 probe must settle these before real runs):** the exact Gemini
-model id strings; whether `m3b` serves chat on this key; whether Gemini limits are per model or
-per project; Gemini token accounting and latency; whether `m3b`/`m8b` keep valid JSON with the
-full `TurnDecision` format (JSON mode guarantees syntax, not our fields).
+**After the Phase 6 probe (2026-10-08, D27):** settled: the Gemini ids, Gemini token accounting
+(`output_tokens` include thinking; 0 at `thinking_level: minimal`), latencies, valid full
+`TurnDecision` JSON for m8b, g31 and g35 (json_schema). Still open: whether g31 and g35 share one
+daily counter (Google: limits are per project and vary by model; no headers on success), and the
+full-decision validity of m3b and m14b (re-probe pending). Details: `docs/quota_plan.md`.
 
 ---
 
@@ -1071,10 +1072,12 @@ generations).
 ### 13.2 Budget (estimate; the rate limiter and quota guard in §11.7 enforce the real limits)
 
 Lite: 6 calls × ~12 turns = 72 calls per run, ~79 with 10% retries (10–14 turn horizon → 66–92).
-**Tokens per call are an estimate until Phase 6 measures them: plan on 4,000 (range 2,000–6,000;
-Gemini may add hidden thinking tokens).** One run ≈ 320K tokens. E1 ≈ 3,950 calls ≈ 15.8M tokens
-(9.5M on Mistral, about 1% of its monthly cap; 6.3M on Gemini, limited by 500 requests/day each,
-not by tokens). E2a ≈ 216–240 calls per model; E2b ≈ 360–400 calls per model. `g35` is the busiest Gemini lane: E1 (790) + E2b (~400) ≈ 1,190 calls ≈ 3 days of its 400-call daily budget; `g31` needs ~790 calls ≈ 2 days. Deep: ~300–430 calls per
+**Tokens per call, measured 2026-10-08 (Phase 6, `docs/quota_plan.md`):** m8b 4,968 (3,652 in +
+1,316 out), g35 3,794 (3,103 + 691, 0 thinking tokens at `thinking_level: minimal`), g31 ~3,900
+(probe), m3b and m14b not yet measured (plan 4,000). The 4,000 planning number holds for Gemini and
+is 24% low for m8b. One run ≈ 300K (Gemini) to 390K (m8b) tokens. E1 ≈ 3,950 calls ≈ 17M tokens
+(about 11M on Mistral, about 1.4% of its 80% monthly cap; 6M on Gemini, limited by 500 requests/day
+each, not by tokens). E2a ≈ 216–240 calls per model; E2b ≈ 360–400 calls per model. `g35` is the busiest Gemini lane: E1 (790) + E2b (~400) ≈ 1,190 calls ≈ 3 days of its 400-call daily budget; `g31` needs ~790 calls ≈ 2 days. Deep: ~300–430 calls per
 run, so deep runs go on `m14b`. The runner prints the estimated calls, tokens and days per lane
 before starting, compares them with the ledger, and asks for confirmation.
 
@@ -1181,13 +1184,13 @@ Video rule: record replays of finished runs. Never run live.
 | D18 | Unverified pieces: Armington form is textbook (not from a paper); startup/shock hazards, stability formula, default rule, trust are our design. The report must say so | Locked |
 | D19 | Quota guard (§11.7): 80% cap, admission control, pause at seat boundary, resume after reset | Locked |
 | D20 | Provider overflow only for the identical model id; provider logged per call. Currently unused (each of the 5 models has a single provider) | Locked |
-| D21 | Planning token cost = 4,000/call until measured in Phase 6 (earlier 1.8k–3k estimate was too low for the full prompt + briefing + schema, and ignores hidden reasoning tokens) | Locked, revisit after measurement |
+| D21 | Planning token cost per call. Measured 2026-10-08 (full prompt + briefing + schema): m8b 4,968, g35 3,794, g31 ~3,900 (probe); m3b/m14b keep 4,000 until measured. The runner's estimate uses the measured value per model (`tokens_per_call_measured`) | Locked (updated with Phase 6 measurements) |
 | D22 | Roster (replaces earlier drafts): 3 Mistral models (`ministral-3b/8b/14b-2512`) + 2 Gemini models (3.1 and 3.5 Flash-Lite). Small, Medium, Large are blocked or missing on this account; Groq, OpenRouter, Cerebras are not in the plan | Locked (owner confirmed 2026-10-06) |
 | D23 | Client-side rate limiter at 80% of every published limit: spacing + 60 s windows + token window + daily counters; one lane (process) per model key; limiter shared by leaders, sub-agents, referee and retries (§11.7) | Locked |
 | D24 | A 429 with zero allowance (`limit-req-minute: 0`) is a permanent block: stop, never retry. Other 429s wait and retry with adaptive slow-down (§11.7 table). Replaces "wait and retry on any 429" | Locked |
 | D25 | Five experiment conditions; E2 split into E2a (size ladder, M=3) and E2b (m14b vs g35, M=2); M must divide 6 (§13) | Locked |
 | D26 | Mistral Experiment-plan data may be used for training; Google free-tier content is used to improve products; acceptable because prompts hold only fictional-world content | Locked |
-| D27 | Unverified until the Phase 6 probe: Gemini model id strings, whether `m3b` serves chat, per-model vs shared Gemini quota, Gemini token accounting and latency, JSON reliability on the full `TurnDecision` | **Provisional** |
+| D27 | Phase 6 probe (2026-10-08): Gemini ids `gemini-3.1-flash-lite` and `gemini-3.5-flash-lite` confirmed by `models.list` and live calls; `m3b` serves chat; Gemini `output_tokens` include thinking, 0 thinking tokens at `minimal`; latency m8b 16 s, g35 17 s, g31 5 s per full decision; JSON reliability: m8b 0/42 and g35 0/44 parse failures (3 g35 retries). **Still open:** shared vs separate Gemini daily quota (no headers on success; P6-3), full-decision validity for m3b and m14b (re-probe pending, P6-1) | Partly resolved; open items in `docs/open_issues.md` |
 | D28 | Engine review fixes (flagged as changes to the planned model): (a) energy inputs removed from stock once, in step 1, no second subtraction in the price rule; (b) price rule uses `D_eff = D + export requests` and `S_eff = S_dom + imports`, so a sold-out exporter's price rises; (c) households also spend `c_w=0.10` of their cash stock `H_i` each turn, or the economy leaks money and shrinks; (d) `D_gov` is part of total GOODS demand in trade and prices; (e) firm profit = all remaining cash after wages and energy, paid to owners or treasury, firm accounts end at 0. (b) and (c) were checked with small toy models before editing | Locked, re-test in Phase 4 calibration |
 | D29 | Agent output uses a flat `ActionIn` on the wire; `validator.py` converts to the strict typed actions of §9. Structured-output method (`json_schema` / `function_calling` / `json_mode`) is chosen per model by the Phase 6 probe | Locked; method **Provisional** until probe |
 | D30 | Energy refill: `D[i,ENERGY] = D_house + Σ_g E_d[i,g]` (this turn's planned inputs, before rationing, as next turn's expectation). The firm part is stock-building (into stock, not consumed; §6.14 unchanged), enters `D_eff`, and lowers the exporter's surplus `X` (§6.3) | Locked (owner decision 2026-10-06) |
@@ -1228,6 +1231,11 @@ Video rule: record replays of finished runs. Never run live.
 | D65 | Leader-change memory wipe (§6.11): the new leader's tenure starts the turn after a step() leader change, or on the turn of a `leader_death` shock. The briefing hides earlier leaders' turns (section 9 and last turn's rejected actions) and says "the previous leader was removed" only on the new leader's first turn (the Phase 4 rule missed leader deaths at turn start). Policies may define `on_leader_change(country)`; both loops call it before the new leader's first decision; bots ignore it | Added by assistant (Phase 5), change if unwanted |
 | D66 | Experiment database details (§15): values unrounded; each turn is written as delete + insert in one transaction (recording a turn twice never duplicates rows); sector vectors in `country_state` are JSON lists; `metrics` is long format (power and real GDP so far); `llm_calls` rows only for policies that report raw text or tokens; collateral-damage counterfactuals (§12.2) are left to Phase 7 (the `resolve` node is the hook point) | Added by assistant (Phase 5), change if unwanted |
 | D67 | Briefing text format (§11.2): numbers ≥ 10,000 with thousands separators, below 0.001 in e-notation, otherwise plain (3 significant figures); quarter heading says "The world continues after this quarter". The structured briefing that bots read also holds the leader's OWN past records (its own private plan); the rendered text never shows any private field | Added by assistant (Phase 5), change if unwanted |
+| D68 | Checkpoint size (P5-1, target ≤ 3 MB per 14-turn game): the graph state keeps ledger balances only; at each turn boundary (`record`) the ledger is rebased (opening = balances, empty log) after that turn's transfers are written to a new `ledger_transfers` table, so per-account reconciliation can be redone from the database. When a run finishes, `prune_checkpoints` keeps only the turn-boundary checkpoints (input + one per turn; fork and resume use only these), relinks parents and runs an incremental vacuum (`auto_vacuum = INCREMENTAL` on new files). Measured: 15 checkpoints, 1.8 MB, 1.9 MB file for a 14-turn bot game (was 35 MB). step() reads only the current turn's transfers, so state hashes are unchanged | Added by assistant (Phase 6), change if unwanted |
+| D69 | **Changes D54:** fields an action type does not use are IGNORED (dropped, recorded as a note in the `actions` table: "ignored unused fields: ...") instead of rejecting the action. Reason: in the live smoke game m8b filled every field of the flat `ActionIn` with defaults (target ALL, sector ENERGY, rate 0, ...), so 36/36 actions were rejected although every intent was clear; after this change 33/36 were accepted (the 3 rejections were real errors). Missing fields, bad values and unknown enums still reject as in D54 | Added by assistant (Phase 6), **review** |
+| D70 | Prompt and output limits after the probe: `max_output_tokens` 1000 → 2000 (m8b used all 1000 and was cut off mid-JSON); the system prompt shows the answer as a typed shape (types only, no example values, so nothing anchors the stance) and says every field is required; each action is shown in its exact JSON shape. HTTP timeout 120 s (m14b took ~41–60+ s for a full answer) | Added by assistant (Phase 6), change if unwanted |
+| D71 | Rate/quota control details (§11.7): the limiter raises `QuotaPause` instead of sleeping when the wait would exceed 61.5 s (60 s + the 1 s minute-boundary slack); a failed attempt counts as one request; the estimate is replaced by real usage after the call. `QuotaPause` / `RunStop` propagate out of the `leader` node, so the last checkpoint is the previous seat boundary; the runner stores status `paused` + `resume_after` (UTC), or `blocked_model` / `auth_error` / `model_unavailable`. Daily counters per `quota_group` (else per model key) in `data/quota.db`; Mistral's monthly window is the UTC calendar month. Gemini thinking: `thinking_level: minimal` (lowest level in the Gemini thinking docs; 0 thinking tokens measured) | Added by assistant (Phase 6), change if unwanted |
+| D72 | LLM call logging: one `llm_calls` row per attempt (call and retry), cached replays included (`cached` = 1): provider, model key, model id, structured method, attempt, tokens in/out/thinking, latency, transport retries (429/5xx), raw and parsed output, error. A LitePolicy is bound to one ModelClient (one model id) for the whole run; all seats of one model key share one client and limiter | Added by assistant (Phase 6), change if unwanted |
 
 ---
 
@@ -1283,17 +1291,17 @@ Video rule: record replays of finished runs. Never run live.
 
 ---
 
-## 20. Appendix A: `config/models.yaml` (initial content; Claude Code creates this file)
+## 20. Appendix A: `config/models.yaml` (current content after the Phase 6 probe, 2026-10-08)
 
 ```yaml
 # Limits are PUBLISHED limits. The limiter applies `safety` (0.8) on top.
-# status: verified | untested | unverified.  A model with a TODO_VERIFY id or status != verified
+# status: verified | untested | unverified (Phase 6 probe + smoke games 2026-10-08, docs/quota_plan.md).  A model with a TODO_VERIFY id or status != verified
 # must be refused by the runner for real experiment runs (smoke/probe runs only).
 defaults:
-  structured_method: TODO_VERIFY  # json_schema | function_calling | json_mode; Phase 6 probe sets it per model
+  structured_method: json_schema  # per-model value below wins (Phase 6 probe 2026-10-08)
   safety: 0.8
   temperature: 0.7
-  max_output_tokens: 1000        # real TurnDecision needs ~700; replies run verbose, keep a cap
+  max_output_tokens: 2000        # probe 2026-10-08: m8b used all of 1000 and was cut off mid-JSON
   max_concurrency: 1
   retries_transient: 3
 
@@ -1303,26 +1311,36 @@ models:
     model_id: ministral-3b-2512
     limits: {rps: 12.5, tpm: 1300000, rpm: null, rpd: null, tpd: null, tokens_per_month: 1000000000}
     quota_window: {kind: monthly}
-    latency_assumed_s: 1.5
+    latency_measured_s: 4.0
     max_concurrency: 2           # far below its limits; limiter still enforces the pace
-    status: untested             # listed on the key; no chat call tested yet
-    source: "Mistral console Limits page (owner paste 2026-10-05)"
+    structured_method: json_schema   # tentative: answered with all 3 methods, validity not recorded
+    status: unverified           # serves chat (probe 2026-10-08), but valid full TurnDecision not proven
+    probe: "2026-10-08: 3 answers (json_schema, function_calling, json_mode), 3.5k-4.6k tokens/call, ~4 s; validity lost (probe logging bug); re-probe needed"
+    source: "Mistral console Limits page (owner paste 2026-10-05); /v1/models lists ministral-3b-2512"
   m8b:
     provider: mistral
     model_id: ministral-8b-2512
     limits: {rps: 3.13, rpm: 188, tpm: 625000, rpd: null, tpd: null, tokens_per_month: 1000000000}
     quota_window: {kind: monthly}
-    latency_measured_s: 2.6
+    latency_measured_s: 16.1       # mean of 36 live decisions (smoke 2026-10-08); 2.6 s for a tiny object
     max_concurrency: 2
-    status: verified             # live call 2026-10-06, valid JSON, headers match
-    source: "live response headers 2026-10-06"
+    structured_method: json_schema
+    status: verified             # probe + smoke 2026-10-08: 42 live decisions, 0 parse failures
+    tokens_in_measured: 3652
+    tokens_out_measured: 1316
+    tokens_reasoning_measured: 0
+    tokens_per_call_measured: 4968
+    probe: "2026-10-08: json_schema valid after the prompt gained a typed answer shape (before: stopped before actions/forecast, 1000-token cap cut it off); Layer 1 rejected all 6 actions (extra fields) before the action shapes were added"
+    source: "live response headers 2026-10-06 and 2026-10-08 (188 req/min, 625,000 tokens/min)"
   m14b:
     provider: mistral
     model_id: ministral-14b-2512
     limits: {rps: 0.5, rpm: 30, tpm: 937500, rpd: null, tpd: null, tokens_per_month: 1000000000}
     quota_window: {kind: monthly}
-    latency_measured_s: 3.2
-    status: verified
+    latency_measured_s: 41.0
+    structured_method: function_calling  # the only method that answered within 60 s in the probe
+    status: unverified           # probe 2026-10-08: valid full TurnDecision not proven
+    probe: "2026-10-08: json_schema timed out (60 s) 4 times; function_calling answered once in ~41 s (4,699 tokens, validity lost); json_mode failed 4 times. Timeout now 120 s; re-probe needed"
     source: "live response headers 2026-10-06"
   g31:
     provider: google
@@ -1330,20 +1348,32 @@ models:
     limits: {rps: null, rpm: 15, tpm: 250000, rpd: 500, tpd: null}
     quota_window: {kind: daily, tz: America/Los_Angeles, at: "00:00"}   # 12:30 IST until 2026-11-01, then 13:30 IST
     quota_group: google_a        # put g31 and g35 in the SAME group if the dashboard shows one shared pool
-    latency_assumed_s: 2.5
-    thinking: TODO_VERIFY        # lowest thinking setting the API offers (check docs for the parameter name)
-    status: unverified
-    source: "Google AI Studio dashboard (owner read 2026-10-06)"
+    latency_measured_s: 5.1        # probe only (1 call, shorter prompt version)
+    structured_method: json_schema
+    tokens_in_measured: 2436       # probe prompt; the final prompt adds ~650 input tokens (as for g35)
+    tokens_out_measured: 800
+    tokens_reasoning_measured: 0
+    tokens_per_call_measured: 3900 # planning value: probe + the prompt growth measured on g35
+    probe: "2026-10-08: id listed by models.list and answers; valid full TurnDecision with json_schema, 3 actions accepted; 0 thinking tokens at thinking_level minimal"
+    thinking: minimal            # thinking_level; lowest level per ai.google.dev/gemini-api/docs/thinking (2026-10-08)
+    status: verified             # probe 2026-10-08
+    source: "Google AI Studio dashboard (owner read 2026-10-06); ids confirmed by models.list 2026-10-08"
   g35:
     provider: google
     model_id: gemini-3.5-flash-lite   # exact id from the owner (AI Studio, 2026-10-06); probe confirms
     limits: {rps: null, rpm: 15, tpm: 250000, rpd: 500, tpd: null}
     quota_window: {kind: daily, tz: America/Los_Angeles, at: "00:00"}
     quota_group: google_b
-    latency_assumed_s: 2.5
-    thinking: TODO_VERIFY
-    status: unverified
-    source: "Google AI Studio dashboard (owner read 2026-10-06)"
+    latency_measured_s: 16.6       # mean of 37 live calls (smoke 2026-10-08); probe 11.8 s
+    structured_method: json_schema
+    tokens_in_measured: 3103
+    tokens_out_measured: 691
+    tokens_reasoning_measured: 0
+    tokens_per_call_measured: 3794
+    probe: "2026-10-08: id listed by models.list and answers; valid full TurnDecision with json_schema, 3 actions accepted; 0 thinking tokens at thinking_level minimal"
+    thinking: minimal
+    status: verified             # probe 2026-10-08
+    source: "Google AI Studio dashboard (owner read 2026-10-06); ids confirmed by models.list 2026-10-08"
 
 blocked_or_unavailable:          # tested 2026-10-06; never route traffic here
   - {model_id: mistral-small-2603,   reason: "429 with limit-req-minute 0 (zero allowance)"}

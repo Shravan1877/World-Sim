@@ -122,3 +122,22 @@ def test_runner_cli_run_pause_resume_fork(tmp_path) -> None:
     with sqlite3.connect(cp) as c:  # both threads live in the one checkpoint file
         threads = {r[0] for r in c.execute("SELECT DISTINCT thread_id FROM checkpoints")}
     assert threads == {"A", "B"}
+
+
+def test_ledger_transfers_in_db_reconcile_every_account(stored) -> None:
+    """D68: the graph state keeps balances only; the database holds every transfer, so each account's
+    final balance = its starting balance + inflows - outflows recomputed from the database."""
+    import math
+
+    from world.ledger import all_accounts
+
+    db, values, start, _ = stored
+    tr = db.read("ledger_transfers", "R1")
+    assert len(tr) > 0 and set(tr.turn) == set(range(1, TURNS + 1))
+    final = decode(values["world"])
+    for acc in all_accounts():
+        name = str(acc)
+        flow = math.fsum(tr.amount[tr.dst == name]) - math.fsum(tr.amount[tr.src == name])
+        assert start.ledger.balance(acc) + flow == pytest.approx(
+            final.ledger.balance(acc), rel=1e-9, abs=1e-9
+        )

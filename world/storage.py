@@ -6,7 +6,8 @@ rows of that (run_id, turn): recording a turn twice (a resume after a crash betw
 write and the checkpoint) gives the same rows, never duplicates.
 
 Tables (§15): runs, turns, country_state, bilateral, firms, shocks, decisions, actions, treaties,
-commitments, predictions, facts_checks, metrics, llm_calls, referee_flags.
+commitments, predictions, facts_checks, metrics, llm_calls, referee_flags; plus ledger_transfers (D68:
+every money transfer of every turn, so the per-account reconciliation can be redone from the database).
 Numbers are stored unrounded (briefings round; analysis must not). Sector vectors in country_state
 are JSON lists in sector order FOOD, ENERGY, GOODS, TECH, SERVICES.
 """
@@ -31,6 +32,7 @@ from world.engine.shocks import ShockEvent
 from world.engine.state import WorldState
 from world.engine.step import TurnLog
 from world.history import SeatRecord, TurnRecord
+from world.ledger import Transfer
 from world.metrics import power, real_gdp
 from world.policies.base import DecisionResult
 
@@ -38,7 +40,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY, experiment TEXT, seed INTEGER, config_hash TEXT, models_per_seat TEXT,
     scenario TEXT, shocks_on INTEGER, horizon INTEGER, git_commit TEXT, started_at TEXT, ended_at TEXT,
-    status TEXT, error TEXT, degraded_seats TEXT, parent_run_id TEXT, fork_turn INTEGER
+    status TEXT, error TEXT, degraded_seats TEXT, parent_run_id TEXT, fork_turn INTEGER, resume_after TEXT
 );
 CREATE TABLE IF NOT EXISTS turns (
     run_id TEXT, turn INTEGER, move_order TEXT, shocks TEXT, events TEXT, violations TEXT,
@@ -98,9 +100,13 @@ CREATE TABLE IF NOT EXISTS metrics (
     run_id TEXT, turn INTEGER, country TEXT, name TEXT, value REAL
 );
 CREATE TABLE IF NOT EXISTS llm_calls (
-    run_id TEXT, turn INTEGER, country TEXT, policy TEXT, model TEXT, provider TEXT, tokens_in INTEGER,
-    tokens_out INTEGER, latency_s REAL, retries INTEGER, raw_output TEXT, parsed_output TEXT, error TEXT,
-    created_at TEXT
+    run_id TEXT, turn INTEGER, country TEXT, policy TEXT, provider TEXT, model_key TEXT, model_id TEXT,
+    method TEXT, attempt INTEGER, tokens_in INTEGER, tokens_out INTEGER, tokens_reasoning INTEGER,
+    latency_s REAL, transport_retries INTEGER, cached INTEGER, sample_index INTEGER, raw_output TEXT,
+    parsed_output TEXT, error TEXT, created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS ledger_transfers (
+    run_id TEXT, turn INTEGER, idx INTEGER, src TEXT, dst TEXT, amount REAL, reason TEXT
 );
 CREATE TABLE IF NOT EXISTS referee_flags (
     run_id TEXT, turn INTEGER, country TEXT, model TEXT, flag TEXT, detail TEXT
@@ -109,7 +115,7 @@ CREATE TABLE IF NOT EXISTS referee_flags (
 
 TURN_TABLES = (
     "turns", "country_state", "bilateral", "firms", "shocks", "decisions", "actions", "treaties",
-    "commitments", "predictions", "facts_checks", "metrics", "llm_calls", "referee_flags",
+    "commitments", "predictions", "facts_checks", "metrics", "llm_calls", "referee_flags", "ledger_transfers",
 )  # fmt: skip
 
 
@@ -174,10 +180,10 @@ class Storage:
         """Create (or reset) the run row. Called once when a run starts or a fork is made."""
         with self.conn:
             self.conn.execute(
-                "INSERT OR REPLACE INTO runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     run_id, experiment, seed, config_hash(), _j(policies), scenario, int(shocks_on), horizon,
-                    git_commit(), _now(), None, status, "", "[]", parent_run_id, fork_turn,
+                    git_commit(), _now(), None, status, "", "[]", parent_run_id, fork_turn, None,
                 ),
             )  # fmt: skip
 
@@ -187,14 +193,20 @@ class Storage:
         status: str,
         *,
         error: str = "",
-        degraded_seats: Sequence[str] = (),
+        degraded_seats: Sequence[str] | None = None,
         ended: bool = False,
+        resume_after: str | None = None,
     ) -> None:
+        """Update a run's status (degraded_seats None = keep the stored list)."""
         with self.conn:
             self.conn.execute(
-                "UPDATE runs SET status=?, error=?, degraded_seats=?, ended_at=? WHERE run_id=?",
-                (status, error, _j(list(degraded_seats)), _now() if ended else None, run_id),
-            )
+                "UPDATE runs SET status=?, error=?, degraded_seats=COALESCE(?, degraded_seats), ended_at=?, "
+                "resume_after=? WHERE run_id=?",
+                (
+                    status, error, None if degraded_seats is None else _j(list(degraded_seats)),
+                    _now() if ended else None, resume_after, run_id,
+                ),
+            )  # fmt: skip
 
     def copy_turns(self, src_run: str, dst_run: str, before_turn: int) -> None:
         """A fork starts with its parent's rows for turns < before_turn (the shared past)."""
@@ -221,6 +233,7 @@ class Storage:
         *,
         shock_events: Iterable[ShockEvent] = (),
         results: dict[str, DecisionResult] | None = None,
+        transfers: Iterable[Transfer] = (),
     ) -> None:
         """Everything about one resolved turn. `state` = the state after the turn, `start` = the game's
         starting (settled) state, used for real GDP and the power index (D61)."""
@@ -279,6 +292,8 @@ class Storage:
                 _j({k: (v.item() if isinstance(v, np.generic) else v) for k, v in tr.terms}), tr.duration,
                 tr.status, tr.proposed_turn, tr.start_turn, tr.end_turn, tr.note,
             ))  # fmt: skip
+        for k, tr in enumerate(transfers):
+            rows["ledger_transfers"].append((run_id, t, k, str(tr.src), str(tr.dst), tr.amount, tr.reason))
         for r in record.seats:
             _seat_rows(rows, run_id, t, r, (results or {}).get(r.country))
         with self.conn:
@@ -325,7 +340,9 @@ def _seat_rows(
         d.model_dump_json() if d else None, (res.raw_text or None) if res else None,
         res.parse_error if res else None,
     ))  # fmt: skip
-    acts = [(a, "accepted", "") for a in r.accepted] + [(a, "rejected", why) for a, why in r.rejected]
+    notes = r.action_notes or ("",) * len(r.accepted)
+    acts = [(a, "accepted", n) for a, n in zip(r.accepted, notes, strict=True)]
+    acts += [(a, "rejected", why) for a, why in r.rejected]
     for k, (a, status, why) in enumerate(acts):
         rows["actions"].append((*key, k, a.type, status, why, a.model_dump_json()))
     cms = [(c, "kept", "") for c in r.commitments] + [(c, "dropped", why) for c, why in r.dropped_commitments]
@@ -336,8 +353,26 @@ def _seat_rows(
         rows["predictions"].append((*key, p.country, p.move, p.probability, status, why))
     for f in r.fact_checks:
         rows["facts_checks"].append((*key, f.country, f.metric, f.stated, f.true, int(f.wrong)))
-    if res is not None and (res.raw_text or res.tokens_in or res.tokens_out):
-        rows["llm_calls"].append((
-            *key, r.policy, None, None, res.tokens_in, res.tokens_out, res.latency_s, res.retries,
-            res.raw_text, d.model_dump_json() if d else None, res.parse_error, _now(),
-        ))  # fmt: skip
+    for c in res.calls if res is not None else ():
+        rows["llm_calls"].append(
+            (
+                *key,
+                r.policy,
+                c.provider,
+                c.model_key,
+                c.model_id,
+                c.method,
+                c.attempt,
+                c.tokens_in,
+                c.tokens_out,
+                c.tokens_reasoning,
+                c.latency_s,
+                c.transport_retries,
+                int(c.cached),
+                c.sample_index,
+                c.raw_text,
+                c.parsed_json,
+                c.error,
+                _now(),
+            )
+        )

@@ -220,3 +220,27 @@ def test_mixed_bot_game_14_turns_through_graph(seed: int) -> None:
     assert values["turn"] == 14 and len(values["logs"]) == 14
     plain = run_game(bot_seats(mixed(seed), CFG), seed=seed, cfg=CFG, turns=14, start=load_fixture(seed))
     assert hashes(values) == [s.state_hash() for s in plain.states[1:]]
+
+
+# ------------------------------------------------------------------------- D68 checkpoint size
+
+
+def test_finished_run_keeps_turn_boundary_checkpoints_under_3mb(tmp_path) -> None:
+    from world.graph import checkpoint_bytes
+
+    db = tmp_path / "cp.db"
+    values, app = graph_game(mixed(11), 11, turns=14, checkpointer=open_checkpointer(db))
+    snaps = list(app.get_state_history(thread_config("run")))
+    assert len(snaps) == 15  # the input checkpoint + one after each turn (the last is the final one)
+    assert [s.values["turn"] for s in snaps] == list(range(14, -1, -1))
+    assert checkpoint_bytes(app, "run") <= 3_000_000
+    assert db.stat().st_size <= 3_000_000
+    # the graph state holds balances only: no transfer log (D68)
+    assert decode(values["world"]).ledger.log == []
+    # a fork still works from a pruned thread, and resumes nothing on a finished one
+    new_pol = {**parse_policies(mixed(11)), "CERES": "aggressor"}
+    fork_app = build_graph(bot_seats(new_pol, CFG), cfg=CFG, checkpointer=app.checkpointer)
+    cfg_fork = fork_run(fork_app, "run", 9, "fork", new_pol)
+    fork_app.invoke(None, {**cfg_fork, "recursion_limit": RECURSION_LIMIT})
+    fork = fork_app.get_state(thread_config("fork")).values
+    assert hashes(fork)[:8] == hashes(values)[:8] and fork["turn"] == 14

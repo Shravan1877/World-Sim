@@ -2,7 +2,7 @@
 
 Every leader, LLM or bot, implements this. DecisionResult = the parsed TurnDecision (or None if the
 policy could not produce a valid one) plus what the logs need: raw text, parse error, tokens,
-latency and retries. Bots fill only `decision`.
+latency, retries, and one CallLog per model call. Bots fill only `decision`.
 """
 
 from __future__ import annotations
@@ -15,6 +15,27 @@ from world.briefing import Briefing
 
 
 @dataclass(frozen=True)
+class CallLog:
+    """One model call (an attempt). Every call is logged to llm_calls (§11.4), cached ones included."""
+
+    provider: str
+    model_id: str
+    model_key: str
+    method: str  # structured-output method
+    attempt: int  # 0 = first call, 1 = the retry after an invalid answer
+    tokens_in: int = 0
+    tokens_out: int = 0
+    tokens_reasoning: int = 0
+    latency_s: float = 0.0
+    transport_retries: int = 0  # 429 / 5xx retries inside this call
+    raw_text: str = ""
+    parsed_json: str | None = None
+    error: str | None = None
+    cached: bool = False
+    sample_index: int = 0
+
+
+@dataclass(frozen=True)
 class DecisionResult:
     decision: TurnDecision | None
     raw_text: str = ""
@@ -23,6 +44,7 @@ class DecisionResult:
     tokens_out: int = 0
     latency_s: float = 0.0
     retries: int = 0
+    calls: tuple[CallLog, ...] = ()
 
 
 class LeaderPolicy(Protocol):

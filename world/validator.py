@@ -65,6 +65,7 @@ class ValidationResult:
     dropped_predictions: tuple[tuple[Prediction, str], ...]
     commitments: tuple[Commitment, ...]
     dropped_commitments: tuple[tuple[Commitment, str], ...]
+    notes: tuple[str, ...] = ()  # one per accepted action: "" or "ignored unused fields: ..." (D69)
 
     @property
     def actions(self) -> list[Action]:
@@ -79,16 +80,21 @@ def allowed_actions(cfg: Config, country: int) -> frozenset[str]:
 # --------------------------------------------------------------------------- conversion
 
 
+def unused_fields(a: ActionIn) -> list[str]:
+    """Filled-in fields that this action type does not use (D69: ignored, noted, not rejected)."""
+    _, required, optional = ACTION_SPECS[a.type]
+    return sorted(a.given().keys() - required - optional)
+
+
 def convert(a: ActionIn) -> Action | str:
-    """ActionIn -> strict action, or a human-readable reason."""
+    """ActionIn -> strict action, or a human-readable reason. Fields the type does not use are dropped
+    (D69: small models fill every field of the flat wire object); a missing field or a bad value
+    still rejects the action."""
     model, required, optional = ACTION_SPECS[a.type]
-    given = a.given()
+    given = {k: v for k, v in a.given().items() if k in required | optional}
     missing = sorted(required - given.keys())
-    extra = sorted(given.keys() - required - optional)
     if missing:
         return f"{a.type}: missing {', '.join(missing)}"
-    if extra:
-        return f"{a.type}: fields not used by this action: {', '.join(extra)}"
     data = dict(given)
     if model is ProposeTreaty:
         try:
@@ -212,7 +218,13 @@ def validate(decision: TurnDecision, ctx: Context) -> ValidationResult:
     rejected.sort(key=lambda r: r[0])
     preds, dropped_p = _predictions(decision.predictions, ctx)
     comms, dropped_c = _commitments(decision.commitments, ctx)
-    return ValidationResult(tuple(accepted), tuple(rejected), preds, dropped_p, comms, dropped_c)
+    notes = []
+    for k, _ in accepted:
+        extra = unused_fields(decision.actions[k])
+        notes.append(f"ignored unused fields: {', '.join(extra)}" if extra else "")
+    return ValidationResult(
+        tuple(accepted), tuple(rejected), preds, dropped_p, comms, dropped_c, tuple(notes)
+    )
 
 
 def _predictions(preds: list[Prediction], ctx: Context):

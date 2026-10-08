@@ -48,3 +48,11 @@ uv run ruff check
   (`python -m world.runner run | resume | fork`). The graph gives the same state every turn as the
   plain loop; interrupt/resume, crash/resume and forks work. Metrics use real GDP (D61).
   Decisions D61–D67; open points in `docs/open_issues.md`.
+- **Phase 6 (lite LLM agents): done.** Probe of the five models (`scripts/probe_models.py`),
+  rate limiter with 60 s request/token windows and adaptive slow-down (`world/llm/limiter.py`), quota
+  guard with a persistent ledger and pause/resume (`world/llm/quota.py`), router with the §11.7 error
+  table (`world/llm/router.py`), answer cache (`world/llm/cache.py`), the system prompt
+  (`world/llm/prompts/system.md.j2`) and `LitePolicy` (`world/policies/lite.py`). Runner flags
+  `--models`, cost estimate + confirmation, and `runner quota`. Live smoke games with m8b and g35
+  completed (`scripts/show_turn.py` prints a turn). Verified for experiments: m8b, g31, g35; m3b and
+  m14b need a re-probe. Measured tokens and the E1 schedule: `docs/quota_plan.md`. Decisions D68–D72.

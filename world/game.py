@@ -156,6 +156,7 @@ def apply_seat(
         hostile=tuple((kind, COUNTRIES[j]) for kind, j in hostile_acts(state, s, i)),
         public_statement=decision.public_statement,
         degraded=degrade,
+        action_notes=vr.notes,
     )
     return SeatOutcome(s, record, streak, degrade)
 
