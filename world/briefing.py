@@ -2,28 +2,35 @@
 
 build_briefing() reads ONLY engine state and the game history, never computes anything new about the
 economy, and rounds every number to `briefing_sig_figs` (3) significant figures. The same numbers are
-the "true values" for the Layer-2 fact check (Briefing.facts()). Text rendering for the LLM prompt
-(briefing.md.j2) comes in Phase 5; bots read the data directly.
+the "true values" for the Layer-2 fact check (Briefing.facts()). render_briefing() turns the data into
+the prompt text with world/llm/prompts/briefing.md.j2; bots read the data directly.
 
 Sections (§11.2): 1 quarter; 2 your numbers; 3 other countries (public numbers, trust both ways);
 4 this quarter's shocks and last quarter's events; 5 this quarter so far (earlier movers' accepted
 actions and public statements); 6 still to move; 7 who hurt you (last 2 turns); 8 treaties;
 9 your last 2 turns and the actions rejected last turn with reasons.
-Never shown: other countries' private plans, predictions, forecasts or stances.
+Never shown: other countries' private plans, predictions, forecasts or stances (only accepted actions
+and public statements reach SeatView), and never the game length (§8: the horizon is hidden).
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from functools import cache
+from pathlib import Path
 
+import jinja2
 import numpy as np
+from pydantic import BaseModel
 
 from world.actions import Action
 from world.config import COUNTRIES, SECTORS, Config
 from world.engine import treaties as treaties_mod
 from world.engine.state import WorldState
-from world.history import SeatRecord, TurnRecord
+from world.history import SeatRecord, TurnRecord, tenure_start
+
+PROMPTS = Path(__file__).parent / "llm" / "prompts"
 
 PUBLIC_METRICS = (
     "gdp",
@@ -182,7 +189,11 @@ def build_briefing(
         hurt += [(state.turn, r.country, kind) for kind, victim in r.hostile if victim == country]
     expiry = cfg.world.treaties.proposal_expiry_turns
     mine = [t for t in s.treaties if i in t.parties()]
+    # Leader change (§6.11): the new leader does not see what earlier leaders did or were told.
+    since = tenure_start(country, history, shocks, s.turn)
     last = history[-1].seat(country) if history else None
+    if last is not None and last.turn < since:
+        last = None
     return Briefing(
         turn=s.turn,
         country=country,
@@ -209,7 +220,109 @@ def build_briefing(
             for t in mine
             if t.proposer == i and treaties_mod.proposal_open(t, s.turn, expiry)
         ),
-        my_last_turns=tuple(r for rec in history[-2:] for r in rec.seats if r.country == country),
+        my_last_turns=tuple(
+            r for rec in history[-2:] for r in rec.seats if r.country == country and r.turn >= since
+        ),
         rejected_last_turn=tuple((a.type, why) for a, why in last.rejected) if last else (),
-        leader_removed=bool(s.leader_changed_turn[i] == s.turn - 1 and s.turn > 1),
+        leader_removed=since == s.turn and since > 0,
+    )
+
+
+# ------------------------------------------------------------------------------------- text
+
+
+def num(x: float | int | None) -> str:
+    """A rounded number as short text: 0.123, 12.3, 1, 12,300; very small values in e-notation."""
+    if x is None:
+        return "-"
+    x = float(x)
+    if x == 0 or not math.isfinite(x):
+        return "0" if x == 0 else str(x)
+    if abs(x) >= 1e4:
+        return f"{x:,.0f}"
+    if abs(x) < 1e-3:
+        return f"{x:.2e}"
+    return f"{x:.6f}".rstrip("0").rstrip(".")
+
+
+def action_text(a: BaseModel) -> str:
+    """'set_tariff target=BRONTIA good=ALL rate=0.3' (rounded to 3 significant figures)."""
+    parts = [str(getattr(a, "type", type(a).__name__))]
+    for k, v in a.model_dump().items():
+        if k == "type" or v is None:
+            continue
+        if isinstance(v, bool):
+            v = "on" if v else "off"
+        elif isinstance(v, float):
+            v = num(sig(v))
+        elif isinstance(v, BaseModel | dict):
+            items = v.model_dump() if isinstance(v, BaseModel) else v
+            v = (
+                "{"
+                + ", ".join(
+                    f"{kk}={num(sig(vv)) if isinstance(vv, float) else vv}" for kk, vv in items.items()
+                )
+                + "}"
+            )
+        parts.append(f"{k}={v}")
+    return " ".join(parts)
+
+
+def _actions(acts) -> str:
+    return "; ".join(action_text(a) for a in acts) if acts else "no actions"
+
+
+def _names(xs) -> str:
+    return ", ".join(str(x) for x in xs) if xs else "none"
+
+
+def _pairs(d: dict) -> str:
+    return ", ".join(f"{k} {num(v)}" for k, v in d.items()) if d else "none"
+
+
+def _treaty(t: TreatyView) -> str:
+    terms = ", ".join(f"{k}={num(v) if isinstance(v, float | int) else v}" for k, v in t.terms.items())
+    return f"{t.id}: {t.kind} between {t.proposer} and {t.addressee} ({terms}), {t.duration} quarters"
+
+
+def _commitments(cs) -> str:
+    out = []
+    for c in cs:
+        rate = f" max_rate={num(sig(c.max_rate))}" if c.max_rate is not None else ""
+        out.append(f"{c.kind} toward {c.target} for {c.turns} quarters{rate}")
+    return "; ".join(out) if out else "none"
+
+
+@cache
+def _env() -> jinja2.Environment:
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(PROMPTS),
+        undefined=jinja2.StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+        keep_trailing_newline=True,
+        autoescape=False,
+    )
+    env.filters.update(
+        num=num, actions=_actions, names=_names, pairs=_pairs, treaty=_treaty, commitments=_commitments
+    )
+    return env
+
+
+def render_briefing(b: Briefing) -> str:
+    """The briefing as prompt text (all nine §11.2 sections)."""
+    own = dict(b.own)
+    own["industry_subsidy_on"] = _pairs({g: v for g, v in b.own["industry_subsidy"].items() if v})  # type: ignore[union-attr]
+    if own["industry_subsidy_on"] == "none":
+        own["industry_subsidy_on"] = ""
+    return (
+        _env()
+        .get_template("briefing.md.j2")
+        .render(
+            b=b,
+            me=b.numbers[b.country],
+            own=own,
+            sectors=SECTORS,
+            others=[c for c in COUNTRIES if c != b.country],
+        )
     )

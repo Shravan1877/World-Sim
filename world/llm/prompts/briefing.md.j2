@@ -1,1 +1,104 @@
-{# Per-turn briefing template (CLAUDE.md §11.2). Filled in Phase 6. #}
+{#- Per-turn briefing (CLAUDE.md §11.2). Rendered by world/briefing.py:render_briefing().
+    Every number comes from engine state, already rounded to 3 significant figures.
+    Never put here: other countries' private fields, or how long the game lasts. -#}
+# Briefing for the leader of {{ b.country }}, quarter {{ b.turn }}
+{% if b.leader_removed %}
+
+**The previous leader of {{ b.country }} was removed. You are the new leader.** You have no record of
+what the previous leader decided.
+{% endif %}
+
+## 1. Quarter
+Quarter {{ b.turn }}. The world continues after this quarter.
+
+## 2. Your numbers ({{ b.country }})
+- GDP {{ me.gdp|num }} (growth {{ me.gdp_growth_pct|num }}% on last quarter), inflation {{ me.inflation_pct|num }}% a year, unemployment {{ me.unemployment_pct|num }}%, wage {{ me.wage|num }}
+- Treasury {{ me.treasury|num }}, debt/GDP {{ me.debt_to_gdp|num }}, interest rate {{ me.interest_rate_pct|num }}% a year{% if own.in_default %}, **IN DEFAULT** (spending may not exceed revenue){% endif %}
+
+- Stability {{ me.stability|num }} / 100, military {{ me.military|num }}
+- Tax rate {{ own.tax_rate|num }}; spending (share of GDP): welfare {{ own.welfare_share|num }}, military {{ own.military_share|num }}, subsidy {{ own.subsidy_share|num }}{% if own.subsidy_target %} to {{ own.subsidy_target }}{% endif %}; government revenue last quarter {{ own.gov_revenue|num }}
+{% if own.industry_subsidy_on %}
+- Extra industry subsidy (share of GDP): {{ own.industry_subsidy_on }}
+{% endif %}
+{% if own.energy_levy %}
+- Energy export levy {{ own.energy_levy|num }}
+{% endif %}
+{% if own.policy_rate_override is not none %}
+- Policy rate set by you: {{ own.policy_rate_override|num }} a year
+{% endif %}
+
+| Sector | Output | Stock | Shortage | Firms | Owner |
+|---|---|---|---|---|---|
+{% for g in sectors %}
+| {{ g }} | {{ own.output[g]|num }} | {{ own.stocks[g]|num }} | {{ own.shortages[g]|num }} | {{ own.n_firms[g] }}{% if own.n_firms[g] == 1 %} (monopoly){% endif %} | {{ "state" if g in own.nationalized else "private" }} |
+{% endfor %}
+
+- Your highest tariff on each country: {{ own.my_tariffs|pairs }}
+- Highest tariff each country puts on you: {{ own.tariffs_on_me|pairs }}
+- You sanction: {{ own.my_sanctions|names }}. Sanctioning you: {{ own.sanctions_on_me|names }}
+
+## 3. Other countries (public numbers)
+| Country | GDP | Growth % | Inflation % | Unemployment % | Stability | Debt/GDP | Military | Trusts you | You trust |
+|---|---|---|---|---|---|---|---|---|---|
+{% for c in others %}
+{% set n = b.numbers[c] %}
+| {{ c }} | {{ n.gdp|num }} | {{ n.gdp_growth_pct|num }} | {{ n.inflation_pct|num }} | {{ n.unemployment_pct|num }} | {{ n.stability|num }} | {{ n.debt_to_gdp|num }} | {{ n.military|num }} | {{ b.trust_toward_me[c]|num }} | {{ b.my_trust[c]|num }} |
+{% endfor %}
+
+## 4. Shocks and events
+- This quarter's shocks: {{ b.shocks|names }}
+- Last quarter's events: {{ b.last_events|names }}
+
+## 5. This quarter so far
+{% for v in b.so_far %}
+- {{ loop.index }}. {{ v.country }}: {{ v.actions|actions }}. Said: "{{ v.public_statement }}"
+{% else %}
+- You move first this quarter.
+{% endfor %}
+
+## 6. Still to move after you
+{% if b.still_to_move %}
+{{ b.still_to_move|join(", ") }}
+{% else %}
+Nobody: you move last this quarter.
+{% endif %}
+
+## 7. Who hurt you (last 2 quarters)
+{% for turn, who, kind in b.who_hurt_you %}
+- Quarter {{ turn }}: {{ who }}, {{ kind }}
+{% else %}
+- Nobody.
+{% endfor %}
+
+## 8. Treaties
+Active:
+{% for t in b.treaties_active %}
+- {{ t|treaty }}, running since quarter {{ t.start_turn }}
+{% else %}
+- none
+{% endfor %}
+Proposals to you (answer with accept_treaty or reject_treaty and the id):
+{% for t in b.proposals_to_me %}
+- {{ t|treaty }}, proposed in quarter {{ t.proposed_turn }}
+{% else %}
+- none
+{% endfor %}
+Your open proposals:
+{% for t in b.my_proposals %}
+- {{ t|treaty }}, waiting for {{ t.addressee }}
+{% else %}
+- none
+{% endfor %}
+
+## 9. Your last 2 quarters
+{% for r in b.my_last_turns %}
+- Quarter {{ r.turn }}: {{ r.accepted|actions }}. Said: "{{ r.public_statement }}". Commitments: {{ r.commitments|commitments }}
+{% else %}
+- No record.
+{% endfor %}
+{% if b.rejected_last_turn %}
+Actions rejected last quarter:
+{% for kind, why in b.rejected_last_turn %}
+- {{ kind }}: {{ why }}
+{% endfor %}
+{% endif %}

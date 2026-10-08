@@ -86,6 +86,9 @@ class Bot:
     def decide(self, briefing: Briefing) -> DecisionResult:
         return DecisionResult(decision=self.decision(briefing))
 
+    def on_leader_change(self, country: str) -> None:
+        """Leader-change memory wipe hook (§6.11). Bots keep no memory, so nothing to wipe."""
+
     def decision(self, b: Briefing) -> TurnDecision:  # pragma: no cover - overridden
         raise NotImplementedError
 

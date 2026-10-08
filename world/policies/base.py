@@ -29,3 +29,15 @@ class LeaderPolicy(Protocol):
     name: str
 
     def decide(self, briefing: Briefing) -> DecisionResult: ...
+
+    def on_leader_change(self, country: str) -> None:
+        """Memory wipe hook (§6.11): called when `country`'s leader is replaced, before the new
+        leader's first decision. Lite policies drop their recent-decision memory, deep policies
+        archive their notes. The briefing already hides the earlier leaders' turns."""
+
+
+def notify_leader_change(policy: LeaderPolicy, country: str) -> None:
+    """Call the policy's memory-wipe hook if it has one."""
+    hook = getattr(policy, "on_leader_change", None)
+    if callable(hook):
+        hook(country)

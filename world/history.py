@@ -58,3 +58,26 @@ class TurnRecord:
             if r.country == country:
                 return r
         return None
+
+
+def leader_death_text(country: str) -> str:
+    """How a leader_death shock appears in TurnRecord.shocks (see game.shock_text)."""
+    return f"leader_death ({country})"
+
+
+def tenure_start(country: str, history: tuple[TurnRecord, ...], shocks: tuple[str, ...], turn: int) -> int:
+    """First turn played by the country's current leader (0 = the first leader).
+
+    A leader who falls in step() of turn t (unrest, coup, election loss) is replaced from turn t + 1;
+    a leader_death shock at the start of turn t replaces the leader for turn t itself. The briefing
+    hides everything the earlier leaders did ("memory is wiped", §6.11).
+    """
+    start = 0
+    for rec in history:
+        if leader_death_text(country) in rec.shocks:
+            start = max(start, rec.turn)
+        if country in rec.leader_changes:
+            start = max(start, rec.turn + 1)
+    if leader_death_text(country) in shocks:
+        start = max(start, turn)
+    return start

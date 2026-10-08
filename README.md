@@ -40,3 +40,11 @@ uv run ruff check
   (`world/game.py`, `scripts/run_bot_game.py`). Required tests pass: 14-turn × 20-seed bot games,
   macro signs (Phillips, Okun, price convergence), no country dominating the cooperative baseline,
   roster characters and shock bite. Decisions D52–D60; numbers in `docs/calibration.md`.
+- **Phase 5 (LangGraph loop): done.** The turn loop as a LangGraph `StateGraph` (`world/graph.py`:
+  turn_start → leader → validate_apply ×6 → resolve → record) with SQLite checkpoints
+  (`data/checkpoints.db`, thread = run id), an exact plain-data encoding of the game state
+  (`world/serial.py`), the briefing as prompt text with all nine §11.2 sections
+  (`world/llm/prompts/briefing.md.j2`), the experiment database (`world/storage.py`, §15) and a CLI
+  (`python -m world.runner run | resume | fork`). The graph gives the same state every turn as the
+  plain loop; interrupt/resume, crash/resume and forks work. Metrics use real GDP (D61).
+  Decisions D61–D67; open points in `docs/open_issues.md`.

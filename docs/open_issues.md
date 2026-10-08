@@ -1,7 +1,23 @@
-# Open issues (engine, Phases 2–3)
+# Open issues (engine and orchestration, Phases 2–5)
 
-Last updated 2026-10-06. Earlier open items were only in the Phase 3 chat summary; this file now
+Last updated 2026-10-08. Earlier open items were only in the Phase 3 chat summary; this file now
 keeps them in the repo.
+
+## Update after Phase 5 (2026-10-08): LangGraph loop
+
+All Phase 5 tests pass, no xfail. New items:
+- **P5-1, checkpoint size.** SqliteSaver stores the WHOLE graph state at every node (15 checkpoints a
+  turn). The world state carries the ledger's full transfer log (~420 transfers a turn, needed for
+  the exact conservation and reconciliation checks), so a 14-turn bot game writes ~35 MB to
+  `data/checkpoints.db` (~107 KB of state at turn 14). 100 runs would be ~3.5 GB (local, gitignored).
+  Options, none applied: compress the encoded world (about half), keep only turn-boundary checkpoints
+  after a run finishes (forks need only those; ~1 MB a game), or let the ledger keep running
+  per-account sums instead of the full log (an engine change).
+- **S6 resolved by D61:** power, collateral damage and efficiency use real GDP at the settled starting
+  prices. `tests/test_no_dominance.py` still passes with real GDP (largest share 0.291, limit 0.333;
+  mean power gains within ±0.011).
+- **Not built yet (by plan):** collateral-damage counterfactuals in the `resolve` node (Phase 7), quota
+  pauses at seat boundaries and LLM policies (Phase 6), the dashboard (Phase 9).
 
 ## Resolved by the owner's decisions (CLAUDE.md §17)
 

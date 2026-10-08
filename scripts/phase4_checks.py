@@ -74,9 +74,8 @@ def main() -> None:
                       yaxis_title="mean |dP/P| %", yaxis_type="log", template="plotly_white")  # fmt: skip
     save(fig, "phase4_price_convergence.html")
 
-    shares = np.mean(
-        [[power(st, CFG) for st in run_bots("cooperative", sd, 14).states] for sd in range(1, 11)], 0
-    )
+    games = [run_bots("cooperative", sd, 14) for sd in range(1, 11)]
+    shares = np.mean([[power(st, CFG, g.states[0]) for st in g.states] for g in games], 0)
     fig = go.Figure([go.Scatter(x=list(range(15)), y=shares[:, i], name=c) for i, c in enumerate(COUNTRIES)])
     fig.update_layout(title="CooperativeBot self-play: power share (mean of 10 seeds)", xaxis_title="turn",
                       yaxis_title="power share", template="plotly_white")  # fmt: skip
